@@ -31,10 +31,10 @@ VignetteBuilder: knitr
 biocViews: Software, Visualization, ChIPSeq, ATACSeq, Coverage,
         DifferentialExpression, GeneExpression, Annotation
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.1
 Config/testthat/edition: 3
 NeedsCompilation: no
 Packaged: 2026-11-03 17:13:12 UTC; root
 Author: Garrett Evensen [aut, cre],
   Kathryn Lande [aut]
 Maintainer: Garrett Evensen <kgsevensen@gmail.com>
+Config/roxygen2/version: 8.1.0

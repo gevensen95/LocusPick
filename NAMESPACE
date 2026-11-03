@@ -27,6 +27,8 @@ export(signalShift)
 export(topLoci)
 importFrom(ggplot2,.data)
 importFrom(methods,is)
-importFrom(stats,median)
-importFrom(stats,setNames)
+importFrom(stats,
+  median,
+  setNames
+)
 importFrom(utils,write.table)
