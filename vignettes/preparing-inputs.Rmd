@@ -1,0 +1,505 @@
+---
+title: "Preparing input data for LocusPick"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Preparing input data for LocusPick}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(LocusPick)
+library(GenomicRanges)
+ex <- locusPickExample()
+td <- tempfile("LocusPick_inputs_"); dir.create(td)
+```
+
+LocusPick needs six inputs. This vignette gives several ways to produce each,
+starting from the files most pipelines already write. Chunks that run on the
+bundled example data are executed when the vignette is built; chunks that need
+external tools (shown as `bash`) or your own files are shown but not run.
+
+| Input | Format LocusPick reads | Required? |
+|---|---|---|
+| Signal tracks | bigWig, `GRanges`, chromDict, or any function | for signal ranking and plots |
+| Peaks | BED / narrowPeak, `data.frame`, `GRanges` | yes |
+| Gene models | GTF/GFF, or `GRanges` with `type` and `gene_name` | yes |
+| DE results (×2) | any table, mapped with `deTable()` | yes |
+| Expression for insets | long table: `gene`, `panel`, `group`, `value` | optional |
+| Mappability | bigWig (Umap) | optional, recommended |
+
+**Golden rule:** every input must use the **same genome build**. Run
+`checkInputs()` (last section) before anything else; it catches build and
+naming mismatches that otherwise fail silently.
+
+## 1. Signal tracks (bigWig)
+
+One bigWig per **condition** is easiest to read in figures; one per
+**replicate** lets reviewers see consistency. You can make both.
+
+### Option A: deepTools from BAM (recommended)
+
+```bash
+# per replicate; CPM-normalized, 20 bp bins, duplicates removed
+bamCoverage -b young_rep1.bam -o young_rep1.bw \
+    --normalizeUsing CPM --binSize 20 --ignoreDuplicates \
+    --extendReads -p 8            # --extendReads: paired-end fragments
+
+# condition mean across replicates (deepTools >= 3.5.2)
+bigwigAverage -b young_rep1.bw young_rep2.bw young_rep3.bw \
+    -o young_mean.bw --binSize 20 -p 8
+```
+
+Use the same normalization and bin size for every sample you will compare.
+`--effectiveGenomeSize` is only needed with `--normalizeUsing RPGC`.
+
+### Option B: from BAM in R
+
+No command-line tools needed; uses Bioconductor packages only.
+
+```{r, eval = FALSE}
+library(GenomicAlignments)
+bamToBigWig <- function(bam, out, paired = TRUE) {
+    aln <- if (paired) granges(readGAlignmentPairs(bam), on.discordant.seqnames = "drop")
+           else granges(readGAlignments(bam))
+    cov <- coverage(aln) * (1e6 / length(aln))       # CPM
+    rtracklayer::export(cov, out, format = "bigWig")
+}
+bamToBigWig("young_rep1.bam", "young_rep1.bw")
+```
+
+To average replicates in R, add coverages and divide:
+
+```{r, eval = FALSE}
+covs <- lapply(c("young_rep1.bw", "young_rep2.bw"), rtracklayer::import, as = "RleList")
+rtracklayer::export(Reduce(`+`, covs) / length(covs), "young_mean.bw", format = "bigWig")
+```
+
+### Option C: from bedGraph (MACS2, SEACR, nf-core)
+
+MACS2 writes a fragment pileup with `-B`; add `--SPMR` for signal per million
+reads. SEACR and many CUT&RUN pipelines also produce bedGraphs.
+
+```bash
+macs2 callpeak -t young_rep1.bam -c igg.bam -f BAMPE -g mm \
+    -n young_rep1 -B --SPMR --outdir macs2/
+# -> macs2/young_rep1_treat_pileup.bdg
+
+# bedGraph -> bigWig (UCSC tool; chrom.sizes must match your genome build)
+LC_ALL=C sort -k1,1 -k2,2n young_rep1_treat_pileup.bdg > tmp.sorted.bdg
+bedGraphToBigWig tmp.sorted.bdg mm10.chrom.sizes young_rep1.bw
+```
+
+Or in R (works for any bedGraph that fits in memory):
+
+```{r}
+# demo: write a bedGraph from the example track, then convert it back
+bg <- file.path(td, "demo.bedGraph")
+rtracklayer::export(fetchSignal(ex$signal$A, GRanges("chr1:1-60000")), bg,
+                    format = "bedGraph")
+
+gr <- rtracklayer::import(bg, format = "bedGraph")
+seqlengths(gr) <- c(chr1 = 60000)          # use your genome's chrom.sizes
+rtracklayer::export(gr, file.path(td, "demo.bw"), format = "bigWig")
+signalAtPeaks(ex$peaks[1:2], list(demo = file.path(td, "demo.bw")))
+```
+
+A bedGraph can also be used directly, without converting, with
+`rangesSource(rtracklayer::import(bg))`.
+
+### Option D: existing chromDicts or other formats
+
+```{r, eval = FALSE}
+signal <- list(
+    CNR_young = chromDictSource(readRDS("Yng.rds"), binSize = 20),
+    ATAC      = functionSource(function(chr, start, end) myReader(chr, start, end)))
+```
+
+`functionSource()` accepts any function returning `start`/`end` (or `pos`) and
+`score` (or `value`), so other storage formats need no conversion.
+
+### Normalization and spike-ins
+
+CPM/BPM assumes the total amount of binding is the same in every condition. If
+a factor binds less *everywhere* in one condition, CPM hides or distorts that.
+Conversely, a library-size artifact can look like global loss. For CUT&RUN
+with *E. coli* or spike-in DNA, scale by the spike-in instead:
+
+```bash
+# scale = 1 / (spike-in reads in millions); compute per sample
+bamCoverage -b old_rep1.bam -o old_rep1.spike.bw --binSize 20 \
+    --scaleFactor 0.42 --ignoreDuplicates --extendReads
+```
+
+Whichever you choose, `signalShift()` will tell you whether a change at your
+examples differs from the change at all peaks.
+
+## 2. Peaks
+
+### Option A: MACS2 narrowPeak / broadPeak
+
+Read directly; rtracklayer recognizes the format by extension.
+
+```{r, eval = FALSE}
+pk <- asPeaks("macs2/young_rep1_peaks.narrowPeak")
+```
+
+### Option B: SEACR
+
+SEACR writes `chr start end total_signal max_signal max_region`, which
+`asPeaks()` reads as BED:
+
+```{r, eval = FALSE}
+pk <- asPeaks("young_rep1.stringent.bed")
+```
+
+### Option C: HOMER
+
+Convert `peaks.txt` with HOMER's own tool, or in R:
+
+```bash
+pos2bed.pl peaks.txt > peaks.bed
+```
+
+```{r, eval = FALSE}
+h <- read.delim("peaks.txt", comment.char = "#", header = FALSE)
+pk <- asPeaks(data.frame(chr = h$V2, start = h$V3, end = h$V4, name = h$V1))
+```
+
+If you used `annotatePeaks.pl`, keep its gene column and let LocusPick check it
+(`buildCandidates(..., geneCol = "Gene.Name")`), rather than trusting it:
+annotations can link enhancer peaks to genes tens of kilobases away.
+
+### Option D: data.frame from any tool
+
+```{r}
+df <- data.frame(chr = "chr1", start = c(4799, 19799), end = c(5300, 20300))
+asPeaks(df, zeroBased = TRUE)    # TRUE if the starts came from a BED file
+```
+
+### Consensus peaks across replicates
+
+Peaks found in at least *k* replicates are more reliable examples than peaks
+from a single sample.
+
+In R:
+
+```{r}
+consensusPeaks <- function(reps, minReps = 2) {
+    reps <- lapply(reps, function(x) granges(asPeaks(x)))
+    merged <- reduce(do.call(c, unname(reps)))
+    n <- Reduce(`+`, lapply(reps, function(r) overlapsAny(merged, r)))
+    merged[n >= minReps]
+}
+# demo: three "replicates" made by jittering the example peaks
+set.seed(1)
+reps <- lapply(1:3, function(i) {
+    p <- granges(ex$peaks)[sample(length(ex$peaks), 6)]
+    shift(p, sample(-50:50, length(p), replace = TRUE))
+})
+cons <- consensusPeaks(reps, minReps = 2)
+length(cons)
+```
+
+With bedtools:
+
+```bash
+cat rep1.bed rep2.bed rep3.bed | cut -f1-3 | sort -k1,1 -k2,2n \
+    | bedtools merge > merged.bed
+bedtools intersect -a merged.bed -b rep1.bed rep2.bed rep3.bed -c \
+    | awk '$4 >= 2' | cut -f1-3 > consensus.bed
+```
+
+Condition-specific sets follow the same pattern:
+
+```{r}
+young <- cons
+old   <- granges(ex$peaks)[c(1, 2, 7)]
+shared     <- young[overlapsAny(young, old)]
+youngOnly  <- young[!overlapsAny(young, old)]
+c(shared = length(shared), youngOnly = length(youngOnly))
+```
+
+A peak-set label can be carried into the candidate table as a column:
+
+```{r}
+pk <- asPeaks(young)
+pk$peak_set <- ifelse(overlapsAny(pk, old), "shared", "young-only")
+```
+
+### Blacklisted regions
+
+Remove ENCODE blacklist regions (Amemiya et al. 2019; `mm10-blacklist.v2`,
+`hg38-blacklist.v2` from the Boyle lab Blacklist repository) before ranking.
+These regions give high signal in every assay and make misleading examples.
+
+```{r, eval = FALSE}
+bl <- rtracklayer::import("mm10-blacklist.v2.bed.gz")
+pk <- pk[!overlapsAny(pk, bl)]
+```
+
+## 3. Gene models
+
+### Option A: GTF from Ensembl, GENCODE or UCSC
+
+```{r}
+genes <- readGeneModels(system.file("extdata", "toy.gtf", package = "LocusPick"))
+genes
+```
+
+Use the GTF that matches the genome build of your alignments: for example
+GENCODE vM25 or Ensembl 102 for mm10/GRCm38. Ensembl names chromosomes `1`,
+`2`, ...; UCSC and GENCODE use `chr1`. LocusPick converts between the two
+automatically, but `checkInputs()` reports it so you notice.
+
+### Option B: TxDb + OrgDb (no GTF file)
+
+```{r, eval = FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+library(org.Mm.eg.db)
+txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
+g <- GenomicFeatures::genes(txdb)
+e <- unlist(GenomicFeatures::exonsBy(txdb, by = "gene"))
+e$gene_id <- names(e)
+sym <- AnnotationDbi::mapIds(org.Mm.eg.db, c(g$gene_id, e$gene_id),
+                             "SYMBOL", "ENTREZID")
+g$type <- "gene"; g$gene_name <- sym[g$gene_id]
+e$type <- "exon"; e$gene_name <- sym[e$gene_id]
+mcols(e) <- mcols(e)[, c("gene_id", "type", "gene_name")]
+genes <- readGeneModels(c(g, e))
+```
+
+### Option C: any GRanges
+
+`readGeneModels()` accepts a `GRanges` with a `type` column (`gene`,
+`transcript` or `exon`) and a gene name column:
+
+```{r}
+gr <- GRanges("chr1", IRanges(c(100, 100, 800), c(2000, 300, 2000)),
+              strand = "+", type = c("gene", "exon", "exon"),
+              gene_name = "myGene")
+readGeneModels(gr)$genes
+```
+
+### Harmonizing symbols
+
+If the DE tables, peak annotation and GTF come from different annotation
+releases, map everything to current symbols with the same function:
+
+```{r, eval = FALSE}
+h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
+genes <- readGeneModels("genes.gtf", harmonize = h)
+```
+
+## 4. Differential expression tables
+
+`defineGroups()` needs two tables: the **perturbation** (e.g. knockout vs
+control) and the **condition** (e.g. old vs young). `deTable()` maps any
+column names to `gene`, `lfc`, `padj`.
+
+> **Check the direction of every contrast.** Fold changes must be
+> *perturbation / control* and *condition / baseline* (e.g. KO / WT,
+> old / young). A reversed contrast swaps activated and repressed targets
+> without any error.
+
+### Option A: DESeq2
+
+```{r, eval = FALSE}
+res <- DESeq2::results(dds, contrast = c("genotype", "KO", "WT"))   # KO / WT
+df <- as.data.frame(res)
+df$gene <- rownames(df)
+ko <- deTable(df, gene = "gene", lfc = "log2FoldChange", padj = "padj")
+```
+
+The same mapping applies to a DESeq2 table saved to disk:
+
+```{r}
+deseq <- data.frame(row.names = c("geneA", "geneB", "geneC"),
+                    baseMean = c(200, 50, 120), log2FoldChange = c(-2, 1.5, -1),
+                    lfcSE = 0.2, pvalue = c(1e-8, 1e-6, 1e-4),
+                    padj = c(1e-6, 1e-5, 1e-3))
+deseq$gene <- rownames(deseq)
+deTable(deseq, gene = "gene", lfc = "log2FoldChange", padj = "padj")
+```
+
+### Option B: edgeR
+
+```{r, eval = FALSE}
+tt <- edgeR::topTags(qlf, n = Inf)$table
+tt$gene <- rownames(tt)
+ko <- deTable(tt, gene = "gene", lfc = "logFC", padj = "FDR")
+```
+
+### Option C: limma / limma-voom
+
+```{r, eval = FALSE}
+tt <- limma::topTable(fit, coef = "genotypeKO", number = Inf)
+tt$gene <- rownames(tt)
+ko <- deTable(tt, gene = "gene", lfc = "logFC", padj = "adj.P.Val")
+```
+
+### Ensembl IDs instead of symbols
+
+Strip version suffixes, then map to symbols:
+
+```{r, eval = FALSE}
+ids <- sub("\\.\\d+$", "", rownames(df))          # ENSMUSG00000017950.16 -> ...950
+df$gene <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, ids,
+                                 "SYMBOL", "ENSEMBL")
+df <- df[!is.na(df$gene), ]
+```
+
+`deTable()` keeps the most significant row when several IDs map to one symbol.
+
+### Restricting to bound genes
+
+To restrict groups to genes with a peak (as "direct targets"), pass them as
+`targets`:
+
+```{r}
+bound <- unique(assignPeaks(ex$peaks, ex$genes)$gene)
+de <- read.delim(system.file("extdata", "toy_de.tsv", package = "LocusPick"))
+defineGroups(deTable(de, lfc = "ko_lfc", padj = "ko_padj"),
+             deTable(de, lfc = "cond_lfc", padj = "cond_padj"),
+             targets = bound, conditionName = "age")[, c("gene", "group")]
+```
+
+## 5. Expression for insets
+
+`plotLocus()` draws expression from a long table with one row per sample:
+`gene`, `panel` (one facet per experiment), `group`, `value`.
+
+### Option A: from a matrix and sample sheet
+
+Works for DESeq2 normalized counts, TPM, or any gene × sample matrix:
+
+```{r}
+toLong <- function(mat, groups, panel) {
+    data.frame(gene  = rep(rownames(mat), times = ncol(mat)),
+               panel = panel,
+               group = rep(groups, each = nrow(mat)),
+               value = as.vector(mat))
+}
+# demo matrix: 3 genes x 6 samples
+mat <- matrix(rpois(18, 100), nrow = 3,
+              dimnames = list(c("geneA", "geneB", "geneC"), paste0("s", 1:6)))
+long <- toLong(mat, groups = rep(c("Young", "Old"), each = 3), panel = "Aging")
+head(long)
+```
+
+With DESeq2:
+
+```{r, eval = FALSE}
+mat <- DESeq2::counts(dds, normalized = TRUE)
+long <- toLong(mat, groups = as.character(dds$age), panel = "Aging")
+```
+
+### Option B: combine several experiments
+
+```{r, eval = FALSE}
+expression <- rbind(
+    toLong(koCounts,  koSamples$genotype, panel = "Hnf4a KO"),
+    toLong(ageCounts, ageSamples$age,     panel = "Aging"))
+expression$gene <- h(expression$gene)    # same symbol harmonization as above
+```
+
+Groups are drawn in the order they first appear, so order the rows (or the
+sample sheet) control-first.
+
+## 6. Mappability
+
+### Option A: Umap multi-read mappability (recommended)
+
+Umap (Karimzadeh et al. 2018) provides, for each base, the fraction of
+overlapping k-mers that map uniquely. The authors distribute mm9, mm10, hg19
+and hg38 as bedGraphs; the bundled script converts one to a bigWig once:
+
+```{r}
+system.file("scripts", "make_umap_bw.sh", package = "LocusPick")
+```
+
+```bash
+bash make_umap_bw.sh 50     # k: closest to your read length (24, 36, 50, 100)
+```
+
+Run it on a node with ~16 GB memory; the intermediate bedGraph is several GB.
+
+### Option B: blacklist only
+
+If you cannot use Umap, remove blacklisted regions from the peaks (section 2)
+and leave `mappability = NULL`. This removes the worst regions but not
+paralog clusters.
+
+### Option C: build Umap for another genome
+
+The Umap software (`bioconda::umap`) computes mappability for any genome; see
+its documentation. It needs substantial compute (the authors report about 200
+CPU hours per read length).
+
+## 7. Check everything together
+
+```{r}
+checkInputs(ex$peaks, ex$genes, signal = ex$signal, groups = ex$groups)
+```
+
+The warning is expected here: the example data deliberately contain one peak in
+a gap of the signal tracks. On real data, a handful of such peaks is normal;
+a large fraction points to a different genome build or chromosome naming in
+the track.
+
+A common failure, gene models from a different build than the peaks, looks
+like this:
+
+```{r}
+shifted <- shift(ex$genes$genes, 1e6)   # simulate gene models from another build
+bad <- ex$genes; bad$genes <- shifted
+checkInputs(ex$peaks, bad)
+```
+
+## Suggested end-to-end workflow
+
+```bash
+# 1. signal: one bigWig per replicate and per condition
+for s in young_rep{1..3} old_rep{1..3}; do
+  bamCoverage -b $s.bam -o $s.bw --normalizeUsing CPM --binSize 20 \
+      --ignoreDuplicates --extendReads -p 8
+done
+bigwigAverage -b young_rep*.bw -o young.bw --binSize 20
+bigwigAverage -b old_rep*.bw   -o old.bw   --binSize 20
+
+# 2. mappability (once per genome and read length)
+bash make_umap_bw.sh 50
+```
+
+```{r, eval = FALSE}
+library(LocusPick)
+h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
+
+# 3. gene models and peaks
+genes <- readGeneModels("gencode.vM25.annotation.gtf", harmonize = h)
+bl    <- rtracklayer::import("mm10-blacklist.v2.bed.gz")
+peaks <- consensusPeaks(list("young_rep1_peaks.narrowPeak",
+                             "young_rep2_peaks.narrowPeak",
+                             "young_rep3_peaks.narrowPeak"), minReps = 2)
+peaks <- asPeaks(peaks[!overlapsAny(peaks, bl)])
+
+# 4. groups (check contrast directions!)
+ko  <- deTable(read.csv("ko_vs_wt_deseq2.csv"),   gene = "gene",
+               lfc = "log2FoldChange", padj = "padj")
+age <- deTable(read.csv("old_vs_young_deseq2.csv"), gene = "gene",
+               lfc = "log2FoldChange", padj = "padj")
+ko$gene <- h(ko$gene); age$gene <- h(age$gene)
+groups <- defineGroups(ko, age, conditionName = "age")
+
+# 5. check, then build
+signal <- list(young = "young.bw", old = "old.bw")
+checkInputs(peaks, genes, signal, groups)
+cand <- buildCandidates(peaks, genes, groups, signal = signal,
+                        mappability = "k50.Umap.MultiTrackMappability.bw")
+```
+
+Continue with `rankLoci()` as described in `vignette("LocusPick")`.

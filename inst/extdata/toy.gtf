@@ -1,0 +1,33 @@
+##gff-version 2
+##source-version rtracklayer 1.62.0
+##date 2026-11-02
+chr1	toy	gene	5000	12000	.	+	.	gene_id "G001"; gene_name "geneA";
+chr1	toy	transcript	5000	12000	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"
+chr1	toy	exon	5000	5400	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"
+chr1	toy	exon	8150	8400	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"
+chr1	toy	exon	11400	12000	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"
+chr1	toy	gene	15000	20000	.	-	.	gene_id "G002"; gene_name "geneB";
+chr1	toy	transcript	15000	20000	.	-	.	gene_id "G002"; gene_name "geneB"; transcript_id "G002.1"
+chr1	toy	exon	15000	15400	.	-	.	gene_id "G002"; gene_name "geneB"; transcript_id "G002.1"
+chr1	toy	exon	17250	17500	.	-	.	gene_id "G002"; gene_name "geneB"; transcript_id "G002.1"
+chr1	toy	exon	19400	20000	.	-	.	gene_id "G002"; gene_name "geneB"; transcript_id "G002.1"
+chr1	toy	gene	25000	30000	.	+	.	gene_id "G003"; gene_name "geneC";
+chr1	toy	transcript	25000	30000	.	+	.	gene_id "G003"; gene_name "geneC"; transcript_id "G003.1"
+chr1	toy	exon	25000	25400	.	+	.	gene_id "G003"; gene_name "geneC"; transcript_id "G003.1"
+chr1	toy	exon	27250	27500	.	+	.	gene_id "G003"; gene_name "geneC"; transcript_id "G003.1"
+chr1	toy	exon	29400	30000	.	+	.	gene_id "G003"; gene_name "geneC"; transcript_id "G003.1"
+chr1	toy	gene	35000	42000	.	+	.	gene_id "G004"; gene_name "geneD";
+chr1	toy	transcript	35000	42000	.	+	.	gene_id "G004"; gene_name "geneD"; transcript_id "G004.1"
+chr1	toy	exon	35000	35400	.	+	.	gene_id "G004"; gene_name "geneD"; transcript_id "G004.1"
+chr1	toy	exon	38150	38400	.	+	.	gene_id "G004"; gene_name "geneD"; transcript_id "G004.1"
+chr1	toy	exon	41400	42000	.	+	.	gene_id "G004"; gene_name "geneD"; transcript_id "G004.1"
+chr1	toy	gene	48000	52000	.	+	.	gene_id "G005"; gene_name "geneE";
+chr1	toy	transcript	48000	52000	.	+	.	gene_id "G005"; gene_name "geneE"; transcript_id "G005.1"
+chr1	toy	exon	48000	48400	.	+	.	gene_id "G005"; gene_name "geneE"; transcript_id "G005.1"
+chr1	toy	exon	49800	50050	.	+	.	gene_id "G005"; gene_name "geneE"; transcript_id "G005.1"
+chr1	toy	exon	51400	52000	.	+	.	gene_id "G005"; gene_name "geneE"; transcript_id "G005.1"
+chr1	toy	gene	54000	57000	.	-	.	gene_id "G006"; gene_name "geneF";
+chr1	toy	transcript	54000	57000	.	-	.	gene_id "G006"; gene_name "geneF"; transcript_id "G006.1"
+chr1	toy	exon	54000	54400	.	-	.	gene_id "G006"; gene_name "geneF"; transcript_id "G006.1"
+chr1	toy	exon	55350	55600	.	-	.	gene_id "G006"; gene_name "geneF"; transcript_id "G006.1"
+chr1	toy	exon	56400	57000	.	-	.	gene_id "G006"; gene_name "geneF"; transcript_id "G006.1"

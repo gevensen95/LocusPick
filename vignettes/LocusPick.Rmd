@@ -1,0 +1,252 @@
+---
+title: "Choosing representative loci with LocusPick"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Choosing representative loci with LocusPick}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 9, fig.height = 5.5)
+```
+
+## Why
+
+Most papers that integrate binding data (ChIP-seq, CUT&RUN, ATAC-seq) with
+expression show a few "representative" genome browser tracks. These are
+usually picked by eye, and the choice is rarely reported. That makes the
+examples hard to reproduce, and it lets avoidable artifacts into figures:
+
+* a peak that the annotation assigns to a gene tens of kilobases away;
+* a peak in a paralog cluster where reads cannot be placed uniquely;
+* a peak in a gap of the signal track, so the browser shows nothing;
+* gene symbols that differ between the annotation, the differential
+  expression table and the gene models, so a gene silently drops out;
+* a change in binding that looks specific to the example but is in fact
+  genome-wide.
+
+LocusPick turns the selection into an explicit pipeline. Every candidate and
+every quality flag is kept in a table, and the ranking weights can be stated in
+a figure legend.
+
+## Workflow
+
+```{r}
+library(LocusPick)
+ex <- locusPickExample()
+```
+
+The example is a synthetic 60 kb chromosome with six genes, eight peaks, two
+signal tracks (`A` and `B`, think "young" and "old") and a mappability track.
+
+### 1. Gene models and peaks
+
+```{r}
+ex$genes                     # readGeneModels("genes.gtf")
+ex$peaks                     # asPeaks("peaks.bed")
+```
+
+`readGeneModels()` accepts a GTF/GFF path or an imported `GRanges`.
+`asPeaks()` accepts BED/narrowPeak files, data frames or `GRanges`.
+
+### 2. Gene groups from two contrasts
+
+Groups combine regulation by the factor (from a perturbation such as a
+knockout) with the direction of change in a condition (such as aging).
+
+```{r}
+de <- read.delim(system.file("extdata", "toy_de.tsv", package = "LocusPick"))
+ko  <- deTable(de, gene = "gene", lfc = "ko_lfc",   padj = "ko_padj")
+age <- deTable(de, gene = "gene", lfc = "cond_lfc", padj = "cond_padj")
+groups <- defineGroups(ko, age, alpha = 0.05, perturbationType = "loss",
+                       conditionName = "condition")
+groups
+```
+
+With `perturbationType = "loss"`, genes that go down in the knockout are
+`activated` by the factor.
+
+### 3. Candidates and quality control
+
+```{r}
+cand <- buildCandidates(ex$peaks, ex$genes, groups,
+                        signal = ex$signal, mappability = ex$mappability,
+                        maxDist = 5000, minMappability = 0.8, minCoverage = 0.5)
+qcSummary(cand)
+cand[, c("gene", "group", "peak_id", "feature", "A_mean", "B_mean",
+         "mappability", "has_signal", "mappable", "eligible")]
+```
+
+Both *geneD* peaks fail, for different reasons: the promoter peak lies in a
+low-mappability region, and the downstream peak sits in a gap of the signal
+tracks. Both stay in the table, flagged, and *geneD*'s group has no eligible
+example. That is itself worth knowing before choosing a figure panel.
+
+If your peaks already carry a gene assignment (for example from HOMER or an
+enhancer-target database), pass it with `geneCol`. LocusPick then checks each
+assignment against your gene models instead of trusting it:
+
+```{r}
+pk <- ex$peaks
+pk$gene <- c("geneA", "geneB", "geneA", "geneD", "geneE", "geneE", "geneF", "geneF")
+chk <- checkAssignment(pk, ex$genes, geneCol = "gene")
+chk[!chk$near_gene, ]
+```
+
+### 4. Ranking
+
+`rankLoci()` scores eligible candidates within each group as a weighted mean of
+percentile ranks. Positive weights reward high values and negative weights
+reward low ones. A candidate missing any weighted value is not scored, so a
+locus can never rank highly on a subset of the criteria.
+
+```{r}
+cand$loss <- cand$A_mean - cand$B_mean
+ranked <- rankLoci(cand, c(A_mean = 1, loss = 1,
+                           abs_lfc_perturbation = 1, abs_lfc_condition = 1))
+top <- topLoci(ranked, n = 3)
+top[, c("group", "gene", "peak_id", "score", "rank")]
+```
+
+Different groups can use different criteria by passing a named list of weight
+vectors.
+
+### 5. Is the change specific?
+
+Before claiming that loss of binding at an example explains its expression
+change, check whether the loss is specific to that group or seen at all peaks:
+
+```{r}
+signalShift(cand, "A_mean", "B_mean",
+            background = signalAtPeaks(ex$peaks, ex$signal))
+```
+
+If every group and the background show a similar shift, a track showing reduced
+binding at the example is consistent with the hypothesis but not specific to
+it. That difference should be reflected in the figure legend.
+
+### 6. Plots
+
+```{r}
+plotLocus(top[1, ], ex$signal, ex$genes,
+          trackGroups = list(Binding = c("A", "B")),
+          colors = c(A = "steelblue", B = "salmon"),
+          expression = ex$expression)
+```
+
+Tracks in one `trackGroups` panel share a y-axis, so conditions are directly
+comparable; different panels (for example CUT&RUN and ATAC) get their own
+scales. For figure panels use `annotate = FALSE`, and set `yLimits` so several
+loci share the same axes.
+
+`reportLoci()` writes one page per locus, plus the full candidate table, for
+review:
+
+```{r, eval = FALSE}
+reportLoci(top, "candidates.pdf", signal = ex$signal, genes = ex$genes,
+           trackGroups = list(Binding = c("A", "B")),
+           expression = ex$expression, candidates = ranked)
+```
+
+## Using your own data
+
+For step-by-step options to produce each input (bigWigs from BAM or
+bedGraph, consensus peaks, gene models, DE tables from DESeq2/edgeR/limma,
+expression insets, mappability) and to check them with `checkInputs()`, see
+`vignette("preparing-inputs", package = "LocusPick")`.
+
+### Signal
+
+Any of these can be used as a track:
+
+```{r, eval = FALSE}
+signal <- list(
+    CNR_young = bigWigSource("cnr_young.bw"),          # bigWig file or URL
+    CNR_old   = "cnr_old.bw",                          # a path also works
+    ATAC      = rangesSource(rtracklayer::import("atac.bedGraph")),
+    H3K27ac   = chromDictSource(readRDS("h3k27ac.rds"), binSize = 20),
+    custom    = functionSource(function(chr, start, end) myFetcher(chr, start, end))
+)
+```
+
+### Mappability
+
+Umap multi-read mappability (Karimzadeh et al. 2018) gives, for each base,
+the fraction of overlapping k-mers that map uniquely. The Umap authors
+distribute it as a bedGraph; the bundled script converts it to an indexed
+bigWig once:
+
+```{r, eval = FALSE}
+system.file("scripts", "make_umap_bw.sh", package = "LocusPick")
+# bash make_umap_bw.sh 50      # k = read length closest to your data
+```
+
+Choose `k` close to your read length; shorter k is more conservative.
+
+### Gene symbols
+
+When sources come from different annotation releases, harmonize symbols
+before building groups and gene models:
+
+```{r, eval = FALSE}
+h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
+genes <- readGeneModels("mm10.gtf", harmonize = h)
+ko$gene  <- h(ko$gene)
+age$gene <- h(age$gene)
+```
+
+## A complete example
+
+The workflow below reproduces a CUT&RUN analysis of a liver transcription factor
+in young and old mice, with a hepatocyte knockout as the perturbation:
+
+```{r, eval = FALSE}
+h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
+genes <- readGeneModels("mm10.gtf", harmonize = h)
+
+ko  <- deTable(read.delim("ko_vs_control.tsv"), gene = "Gene",
+               lfc = "log2FC", padj = "FDR")
+age <- deTable(read.delim("old_vs_young.tsv"), gene = "Gene",
+               lfc = "log2FoldChange", padj = "padj")
+ko$gene <- h(ko$gene); age$gene <- h(age$gene)
+groups <- defineGroups(ko, age, conditionName = "age")
+
+signal <- list(CNR_young = "cnr_young.bw", CNR_old = "cnr_old.bw",
+               ATAC_young = "atac_young.bw", ATAC_old = "atac_old.bw")
+cand <- buildCandidates("young_consensus_peaks.bed", genes, groups,
+                        signal = signal,
+                        mappability = "k50.Umap.MultiTrackMappability.bw",
+                        requireSignal = c("CNR_young", "CNR_old"))
+qcSummary(cand)
+
+cand$CNR_loss <- cand$CNR_young_mean - cand$CNR_old_mean
+w <- c(CNR_young_mean = 1, CNR_loss = 1,
+       abs_lfc_perturbation = 1, abs_lfc_condition = 1)
+ranked <- rankLoci(cand, w)
+signalShift(ranked, "CNR_young_mean", "CNR_old_mean",
+            background = signalAtPeaks("young_consensus_peaks.bed", signal[1:2]))
+
+reportLoci(topLoci(ranked, n = 10), "review.pdf", signal = signal, genes = genes,
+           trackGroups = list(`CUT&RUN` = c("CNR_young", "CNR_old"),
+                              ATAC = c("ATAC_young", "ATAC_old")),
+           candidates = ranked)
+```
+
+## Reporting
+
+A sentence like the following lets readers reproduce the choice:
+
+> Representative loci were selected with LocusPick (v`r packageVersion("LocusPick")`).
+> Peaks were assigned to the nearest gene within 5 kb; loci with mean Umap k50
+> mappability < 0.8, < 50% signal coverage, or an assignment inconsistent with
+> the gene models were excluded. Remaining loci were ranked within each group by
+> the mean percentile rank of young CUT&RUN signal, loss of signal with age, and
+> the absolute knockout and age log2 fold changes. The top-ranked locus per
+> group is shown; all candidates are listed in Supplementary Table X.
+
+```{r}
+sessionInfo()
+```

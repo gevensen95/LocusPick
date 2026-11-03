@@ -1,0 +1,40 @@
+Package: LocusPick
+Type: Package
+Title: Transparent Selection of Representative Loci for Genome Browser
+        Figures
+Version: 0.1.0
+Authors@R: c(
+    person("Garrett", "Evensen", email = "kgsevensen@gmail.com",
+           role = c("aut", "cre")),
+    person("Kathryn", "Lande", role = "aut"))
+Description: Representative genome browser tracks in papers are usually picked
+    by eye. LocusPick replaces that with a reproducible, auditable workflow.
+    It links binding peaks (ChIP-seq, CUT&RUN, ATAC-seq) to genes, places genes
+    into groups defined by two differential expression contrasts (for example a
+    factor knockout and an aging or treatment contrast), runs quality checks
+    that catch common pitfalls (peak-to-gene assignments that disagree with the
+    gene models, low-mappability paralog regions, gaps in signal coverage,
+    outdated gene symbols), ranks candidate loci with explicit weights, and
+    draws multi-track locus plots with expression insets. Every candidate and
+    every quality flag is written to a table so the choice of examples can be
+    reported and reproduced.
+License: MIT + file LICENSE
+URL: https://github.com/gevensen95/LocusPick
+BugReports: https://github.com/gevensen95/LocusPick/issues
+Encoding: UTF-8
+Depends: R (>= 4.3)
+Imports: GenomicRanges, IRanges, S4Vectors, GenomeInfoDb, rtracklayer,
+        ggplot2, patchwork, methods, stats, utils, grDevices
+Suggests: AnnotationDbi, org.Mm.eg.db, testthat (>= 3.0.0), knitr,
+        rmarkdown
+VignetteBuilder: knitr
+biocViews: Software, Visualization, ChIPSeq, ATACSeq, Coverage,
+        DifferentialExpression, GeneExpression, Annotation
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Config/testthat/edition: 3
+NeedsCompilation: no
+Packaged: 2026-11-03 17:13:12 UTC; root
+Author: Garrett Evensen [aut, cre],
+  Kathryn Lande [aut]
+Maintainer: Garrett Evensen <kgsevensen@gmail.com>
