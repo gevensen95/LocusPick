@@ -183,3 +183,11 @@ test_that("checkInputs passes good inputs and flags a build mismatch", {
     expect_equal(out3$status[1], "warn")
     expect_equal(out3$status[2], "ok")   # naming converted automatically
 })
+
+test_that("harmonizeSymbols works with a human OrgDb", {
+    skip_if_not_installed("org.Hs.eg.db")
+    x <- harmonizeSymbols(c("TCF14", "HNF4A", "MLL", "notAGene"),
+                          org.Hs.eg.db::org.Hs.eg.db)
+    expect_equal(as.vector(x), c("HNF4A", "HNF4A", "KMT2A", "notAGene"))
+    expect_equal(nrow(attr(x, "changes")), 2)
+})

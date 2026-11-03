@@ -18,23 +18,142 @@ ex <- locusPickExample()
 td <- tempfile("LocusPick_inputs_"); dir.create(td)
 ```
 
-LocusPick needs six inputs. This vignette gives several ways to produce each,
-starting from the files most pipelines already write. Chunks that run on the
+LocusPick needs six inputs. In most cases you can pass your tools' output
+**as it is**; the first section shows how. The numbered sections then give
+alternatives for each input, for when you want more control or your files
+come from elsewhere. Chunks that run on the
 bundled example data are executed when the vignette is built; chunks that need
 external tools (shown as `bash`) or your own files are shown but not run.
 
 | Input | Format LocusPick reads | Required? |
 |---|---|---|
-| Signal tracks | bigWig, `GRanges`, chromDict, or any function | for signal ranking and plots |
-| Peaks | BED / narrowPeak, `data.frame`, `GRanges` | yes |
+| Signal tracks | bigWig or BAM (one or several per condition), `GRanges`, chromDict, any function | for signal ranking and plots |
+| Peaks | MACS2, SEACR, HOMER, DiffBind, nf-core, BED, `GRanges` | yes |
 | Gene models | GTF/GFF, or `GRanges` with `type` and `gene_name` | yes |
-| DE results (×2) | any table, mapped with `deTable()` | yes |
-| Expression for insets | long table: `gene`, `panel`, `group`, `value` | optional |
+| DE results (×2) | DESeq2 / edgeR / limma objects or tables, any CSV/TSV | yes |
+| Expression for insets | `DESeqDataSet`, `DGEList`, `SummarizedExperiment`, matrix | optional |
 | Mappability | bigWig (Umap) | optional, recommended |
 
 **Golden rule:** every input must use the **same genome build**. Run
 `checkInputs()` (last section) before anything else; it catches build and
 naming mismatches that otherwise fail silently.
+
+
+## The easy way: tool outputs as they are
+
+| Tool output | Function | Notes |
+|---|---|---|
+| DESeq2 `results()` object or saved table | `readDE()` | contrast read from the object and printed |
+| edgeR `glmQLFTest()` / `exactTest()` / `topTags()` | `readDE()` | contrast read from the object and printed |
+| limma fit (`eBayes()`) or `topTable()` | `readDE(fit, coef = ...)` | |
+| Ensembl or Entrez gene IDs | `readDE(..., orgDb = )` | converted to symbols |
+| MACS2/MACS3 `narrowPeak`, `broadPeak`, `_peaks.xls`; Genrich | `readPeaks()` | |
+| SEACR `.stringent.bed` / `.relaxed.bed` | `readPeaks()` | |
+| HOMER `peaks.txt`, `annotatePeaks.pl` output | `readPeaks()` | HOMER's gene column is kept for checking |
+| DiffBind `dba.report()` | `readPeaks()` | fold change and FDR kept |
+| Several replicate peak files | `readPeaks(c(...))` | consensus peaks (in ≥ 2 files by default) |
+| nf-core cutandrun / chipseq / atacseq results folder | `findPipelineOutputs()` | lists bigWigs and peaks; flags IgG/input |
+| Replicate bigWigs or BAMs | `signal = list(young = c("y1.bw", "y2.bw"))` | averaged on the fly |
+| `DESeqDataSet`, `DGEList` | `expressionFrom()` | normalized counts / CPM for insets |
+
+`locusPick()` calls these for you, so a full run can be one call (see
+`vignette("LocusPick")`). Every reader prints what it detected, so you can
+confirm it.
+
+### Differential expression
+
+```{r, eval = requireNamespace("DESeq2", quietly = TRUE)}
+# a small simulated experiment
+set.seed(3)
+counts <- matrix(rnbinom(600, mu = 100, size = 10), nrow = 100,
+                 dimnames = list(paste0("gene", 1:100), paste0("s", 1:6)))
+counts[1:10, 4:6] <- counts[1:10, 4:6] * 6L
+samples <- data.frame(genotype = factor(rep(c("WT", "KO"), each = 3),
+                                        levels = c("WT", "KO")))
+dds <- DESeq2::DESeq(DESeq2::DESeqDataSetFromMatrix(counts, samples, ~ genotype),
+                     quiet = TRUE)
+res <- DESeq2::results(dds, contrast = c("genotype", "KO", "WT"))
+
+ko <- readDE(res)
+head(ko, 3)
+```
+
+The printed contrast ("genotype KO vs WT") confirms the direction. Saved
+tables work the same way, but a plain file does not record its contrast, so
+state it:
+
+```{r, eval = requireNamespace("DESeq2", quietly = TRUE)}
+csv <- file.path(td, "ko_vs_wt.csv")
+write.csv(as.data.frame(res), csv)
+ko <- readDE(csv, direction = "KO/WT")
+```
+
+edgeR and limma objects are read directly too:
+
+```{r, eval = requireNamespace("edgeR", quietly = TRUE) && requireNamespace("limma", quietly = TRUE)}
+y <- edgeR::normLibSizes(edgeR::DGEList(counts, group = samples$genotype))
+design <- model.matrix(~ samples$genotype)
+qlf <- edgeR::glmQLFTest(edgeR::glmQLFit(edgeR::estimateDisp(y, design), design), coef = 2)
+ko_edger <- readDE(qlf)
+
+fit <- limma::eBayes(limma::lmFit(limma::voom(y, design), design))
+ko_limma <- readDE(fit, coef = 2, direction = "KO/WT")
+```
+
+### Peaks
+
+```{r}
+np <- file.path(td, "young_rep1_peaks.narrowPeak")
+writeLines(c("chr1\t4799\t5300\tp1\t100\t.\t5.2\t12.1\t9.8\t251",
+             "chr1\t19799\t20300\tp2\t80\t.\t4.1\t10.0\t8.0\t200"), np)
+seacr <- file.path(td, "young_rep2.stringent.bed")
+writeLines(c("chr1\t4850\t5250\t120.5\t3.2\tchr1:5000-5100",
+             "chr1\t40000\t40400\t80.1\t2.1\tchr1:40100-40200"), seacr)
+
+readPeaks(np)
+readPeaks(c(np, seacr))     # consensus across replicates (and callers)
+```
+
+### Pipeline output folders
+
+```{r}
+# a mock nf-core/cutandrun results folder
+nf <- file.path(td, "results")
+for (d in c("03_peak_calling/03_bed_to_bigwig", "03_peak_calling/04_called_peaks/seacr"))
+    dir.create(file.path(nf, d), recursive = TRUE)
+invisible(file.copy(system.file("extdata", "toy_A.bw", package = "LocusPick"),
+          file.path(nf, "03_peak_calling/03_bed_to_bigwig", c("Y_R1.bigWig", "Y_R2.bigWig"))))
+invisible(file.copy(system.file("extdata", "toy_B.bw", package = "LocusPick"),
+          file.path(nf, "03_peak_calling/03_bed_to_bigwig", c("O_R1.bigWig", "IgG_R1.bigWig"))))
+invisible(file.copy(seacr, file.path(nf, "03_peak_calling/04_called_peaks/seacr",
+                           "Y_R1.seacr.peaks.stringent.bed")))
+
+out <- findPipelineOutputs(nf)
+out[, c("type", "caller", "sample", "control")]
+
+signal <- signalFromFiles(out, c(young = "^Y_", old = "^O_"))   # IgG excluded
+```
+
+### Expression for insets
+
+```{r, eval = requireNamespace("DESeq2", quietly = TRUE)}
+ins <- expressionFrom(dds, group = "genotype", panel = "Knockout")
+head(ins, 3)
+```
+
+### BAM files
+
+When bigWigs are not available yet, BAM files can be used directly; coverage
+is computed (CPM, duplicates and MAPQ < 10 removed) only where needed:
+
+```{r, eval = requireNamespace("Rsamtools", quietly = TRUE) && requireNamespace("GenomicAlignments", quietly = TRUE)}
+bam <- system.file("extdata", "toy.bam", package = "LocusPick")
+signalAtPeaks(ex$peaks[1:3], list(bam = bamSource(bam)))
+```
+
+For figures, bigWigs made with deepTools (section 1) give more control and are
+much faster.
+
 
 ## 1. Signal tracks (bigWig)
 
@@ -140,41 +259,46 @@ examples differs from the change at all peaks.
 
 ## 2. Peaks
 
-### Option A: MACS2 narrowPeak / broadPeak
-
-Read directly; rtracklayer recognizes the format by extension.
+### Option A: MACS2 narrowPeak / broadPeak / xls
 
 ```{r, eval = FALSE}
-pk <- asPeaks("macs2/young_rep1_peaks.narrowPeak")
+pk <- readPeaks("macs2/young_rep1_peaks.narrowPeak")   # or _peaks.xls
 ```
 
 ### Option B: SEACR
 
-SEACR writes `chr start end total_signal max_signal max_region`, which
-`asPeaks()` reads as BED:
+SEACR writes `chr start end total_signal max_signal max_region`; `readPeaks()`
+recognizes it and keeps the signal columns:
 
 ```{r, eval = FALSE}
-pk <- asPeaks("young_rep1.stringent.bed")
+pk <- readPeaks("young_rep1.stringent.bed")
 ```
 
 ### Option C: HOMER
 
-Convert `peaks.txt` with HOMER's own tool, or in R:
-
-```bash
-pos2bed.pl peaks.txt > peaks.bed
-```
+`readPeaks()` reads `peaks.txt` and `annotatePeaks.pl` output directly
+(HOMER coordinates are 1-based; they are kept as is):
 
 ```{r, eval = FALSE}
-h <- read.delim("peaks.txt", comment.char = "#", header = FALSE)
-pk <- asPeaks(data.frame(chr = h$V2, start = h$V3, end = h$V4, name = h$V1))
+pk <- readPeaks("annotated_peaks.txt")
 ```
 
-If you used `annotatePeaks.pl`, keep its gene column and let LocusPick check it
-(`buildCandidates(..., geneCol = "Gene.Name")`), rather than trusting it:
-annotations can link enhancer peaks to genes tens of kilobases away.
+From `annotatePeaks.pl`, the gene column is kept as `homer_gene`. To use
+HOMER's assignment rather than LocusPick's, pass `geneCol = "homer_gene"`; it
+is then checked against your gene models, since annotations can link
+enhancer peaks to genes tens of kilobases away.
 
-### Option D: data.frame from any tool
+### Option D: DiffBind
+
+```{r, eval = FALSE}
+db <- DiffBind::dba.report(dba_obj, th = 1)       # all sites
+pk <- readPeaks(db)                                # keeps diff_fold, diff_fdr
+```
+
+Differential binding statistics can then be used in the ranking, e.g.
+`rankLoci(cand, c(diff_fold = 1, abs_lfc_perturbation = 1))`.
+
+### Option E: data.frame from any tool
 
 ```{r}
 df <- data.frame(chr = "chr1", start = c(4799, 19799), end = c(5300, 20300))
@@ -184,9 +308,15 @@ asPeaks(df, zeroBased = TRUE)    # TRUE if the starts came from a BED file
 ### Consensus peaks across replicates
 
 Peaks found in at least *k* replicates are more reliable examples than peaks
-from a single sample.
+from a single sample. `readPeaks()` does this when given several files:
 
-In R:
+```{r, eval = FALSE}
+pk <- readPeaks(c("rep1_peaks.narrowPeak", "rep2_peaks.narrowPeak",
+                  "rep3_peaks.narrowPeak"), minReps = 2,
+                blacklist = "mm10-blacklist.v2.bed.gz")
+```
+
+The same by hand, in R:
 
 ```{r}
 consensusPeaks <- function(reps, minReps = 2) {
@@ -297,63 +427,43 @@ genes <- readGeneModels("genes.gtf", harmonize = h)
 
 ## 4. Differential expression tables
 
-`defineGroups()` needs two tables: the **perturbation** (e.g. knockout vs
-control) and the **condition** (e.g. old vs young). `deTable()` maps any
-column names to `gene`, `lfc`, `padj`.
+`defineGroups()` needs two results: the **perturbation** (e.g. knockout vs
+control) and the **condition** (e.g. old vs young). `readDE()` reads them from
+DESeq2, edgeR or limma (objects or files) and any CSV/TSV with recognizable
+columns; `defineGroups()` calls it automatically.
 
 > **Check the direction of every contrast.** Fold changes must be
 > *perturbation / control* and *condition / baseline* (e.g. KO / WT,
 > old / young). A reversed contrast swaps activated and repressed targets
-> without any error.
+> without any error. `readDE()` prints the contrast recorded in DESeq2 and
+> edgeR objects; for plain tables, state it with `direction`.
 
-### Option A: DESeq2
+### Option A: pass the results directly
 
 ```{r, eval = FALSE}
-res <- DESeq2::results(dds, contrast = c("genotype", "KO", "WT"))   # KO / WT
-df <- as.data.frame(res)
-df$gene <- rownames(df)
-ko <- deTable(df, gene = "gene", lfc = "log2FoldChange", padj = "padj")
+ko  <- readDE(DESeq2::results(dds, contrast = c("genotype", "KO", "WT")))
+age <- readDE(edgeR::glmQLFTest(fit, coef = "ageold"))
+ko  <- readDE(limma_fit, coef = "genotypeKO")
 ```
 
-The same mapping applies to a DESeq2 table saved to disk:
+### Option B: saved tables with unusual column names
+
+Name the columns when detection fails:
 
 ```{r}
-deseq <- data.frame(row.names = c("geneA", "geneB", "geneC"),
-                    baseMean = c(200, 50, 120), log2FoldChange = c(-2, 1.5, -1),
-                    lfcSE = 0.2, pvalue = c(1e-8, 1e-6, 1e-4),
-                    padj = c(1e-6, 1e-5, 1e-3))
-deseq$gene <- rownames(deseq)
-deTable(deseq, gene = "gene", lfc = "log2FoldChange", padj = "padj")
+odd <- data.frame(symbol = c("geneA", "geneB"), effect = c(-2, 1.5),
+                  q = c(1e-6, 1e-5))
+readDE(odd, gene = "symbol", lfc = "effect", padj = "q", direction = "KO/WT")
 ```
 
-### Option B: edgeR
+### Option C: Ensembl or Entrez IDs
 
 ```{r, eval = FALSE}
-tt <- edgeR::topTags(qlf, n = Inf)$table
-tt$gene <- rownames(tt)
-ko <- deTable(tt, gene = "gene", lfc = "logFC", padj = "FDR")
+ko <- readDE(res, orgDb = org.Mm.eg.db::org.Mm.eg.db)   # ENSMUSG... -> symbols
 ```
 
-### Option C: limma / limma-voom
-
-```{r, eval = FALSE}
-tt <- limma::topTable(fit, coef = "genotypeKO", number = Inf)
-tt$gene <- rownames(tt)
-ko <- deTable(tt, gene = "gene", lfc = "logFC", padj = "adj.P.Val")
-```
-
-### Ensembl IDs instead of symbols
-
-Strip version suffixes, then map to symbols:
-
-```{r, eval = FALSE}
-ids <- sub("\\.\\d+$", "", rownames(df))          # ENSMUSG00000017950.16 -> ...950
-df$gene <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, ids,
-                                 "SYMBOL", "ENSEMBL")
-df <- df[!is.na(df$gene), ]
-```
-
-`deTable()` keeps the most significant row when several IDs map to one symbol.
+Version suffixes (`ENSMUSG00000017950.16`) are removed first. When several IDs
+map to one symbol, the most significant row is kept.
 
 ### Restricting to bound genes
 
@@ -373,42 +483,28 @@ defineGroups(deTable(de, lfc = "ko_lfc", padj = "ko_padj"),
 `plotLocus()` draws expression from a long table with one row per sample:
 `gene`, `panel` (one facet per experiment), `group`, `value`.
 
-### Option A: from a matrix and sample sheet
+### Option A: from DESeq2, edgeR or SummarizedExperiment objects
 
-Works for DESeq2 normalized counts, TPM, or any gene × sample matrix:
+```{r, eval = FALSE}
+ko_expr  <- expressionFrom(dds_ko,  group = "genotype", panel = "Knockout",
+                           levels = c("WT", "KO"))
+age_expr <- expressionFrom(y_age,   group = "group",    panel = "Aging")   # DGEList: CPM
+expression <- rbind(ko_expr, age_expr)
+```
+
+### Option B: from any matrix and a sample vector
+
+TPM, normalized counts, or any gene × sample matrix:
 
 ```{r}
-toLong <- function(mat, groups, panel) {
-    data.frame(gene  = rep(rownames(mat), times = ncol(mat)),
-               panel = panel,
-               group = rep(groups, each = nrow(mat)),
-               value = as.vector(mat))
-}
-# demo matrix: 3 genes x 6 samples
 mat <- matrix(rpois(18, 100), nrow = 3,
               dimnames = list(c("geneA", "geneB", "geneC"), paste0("s", 1:6)))
-long <- toLong(mat, groups = rep(c("Young", "Old"), each = 3), panel = "Aging")
+long <- expressionFrom(mat, group = rep(c("Young", "Old"), each = 3), panel = "Aging")
 head(long)
 ```
 
-With DESeq2:
-
-```{r, eval = FALSE}
-mat <- DESeq2::counts(dds, normalized = TRUE)
-long <- toLong(mat, groups = as.character(dds$age), panel = "Aging")
-```
-
-### Option B: combine several experiments
-
-```{r, eval = FALSE}
-expression <- rbind(
-    toLong(koCounts,  koSamples$genotype, panel = "Hnf4a KO"),
-    toLong(ageCounts, ageSamples$age,     panel = "Aging"))
-expression$gene <- h(expression$gene)    # same symbol harmonization as above
-```
-
-Groups are drawn in the order they first appear, so order the rows (or the
-sample sheet) control-first.
+Groups are drawn in the order given by `levels`, or in the order they first
+appear; put the control first. Pass `orgDb` to convert Ensembl row names.
 
 ## 6. Mappability
 
@@ -477,29 +573,24 @@ bash make_umap_bw.sh 50
 
 ```{r, eval = FALSE}
 library(LocusPick)
-h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
+library(org.Mm.eg.db)
 
-# 3. gene models and peaks
-genes <- readGeneModels("gencode.vM25.annotation.gtf", harmonize = h)
-bl    <- rtracklayer::import("mm10-blacklist.v2.bed.gz")
-peaks <- consensusPeaks(list("young_rep1_peaks.narrowPeak",
-                             "young_rep2_peaks.narrowPeak",
-                             "young_rep3_peaks.narrowPeak"), minReps = 2)
-peaks <- asPeaks(peaks[!overlapsAny(peaks, bl)])
-
-# 4. groups (check contrast directions!)
-ko  <- deTable(read.csv("ko_vs_wt_deseq2.csv"),   gene = "gene",
-               lfc = "log2FoldChange", padj = "padj")
-age <- deTable(read.csv("old_vs_young_deseq2.csv"), gene = "gene",
-               lfc = "log2FoldChange", padj = "padj")
-ko$gene <- h(ko$gene); age$gene <- h(age$gene)
-groups <- defineGroups(ko, age, conditionName = "age")
-
-# 5. check, then build
-signal <- list(young = "young.bw", old = "old.bw")
-checkInputs(peaks, genes, signal, groups)
-cand <- buildCandidates(peaks, genes, groups, signal = signal,
-                        mappability = "k50.Umap.MultiTrackMappability.bw")
+res <- locusPick(
+    peaks        = c("young_rep1_peaks.narrowPeak", "young_rep2_peaks.narrowPeak",
+                     "young_rep3_peaks.narrowPeak"),
+    blacklist    = "mm10-blacklist.v2.bed.gz",
+    perturbation = DESeq2::results(dds_ko, contrast = c("genotype", "KO", "WT")),
+    condition    = DESeq2::results(dds_age, contrast = c("age", "old", "young")),
+    genes        = "gencode.vM25.annotation.gtf",
+    orgDb        = org.Mm.eg.db,
+    signal       = list(CNR_young = "young.bw", CNR_old = "old.bw"),
+    mappability  = "k50.Umap.MultiTrackMappability.bw",
+    expression   = list(expressionFrom(dds_ko,  "genotype", panel = "Knockout"),
+                        expressionFrom(dds_age, "age",      panel = "Aging")),
+    conditionName = "age")
+res
+reportLoci(res, "review.pdf")
 ```
 
-Continue with `rankLoci()` as described in `vignette("LocusPick")`.
+To adjust the ranking or plots, continue step by step as described in
+`vignette("LocusPick")`.

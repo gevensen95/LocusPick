@@ -1,6 +1,6 @@
 ##gff-version 2
 ##source-version rtracklayer 1.62.0
-##date 2026-11-02
+##date 2026-11-03
 chr1	toy	gene	5000	12000	.	+	.	gene_id "G001"; gene_name "geneA";
 chr1	toy	transcript	5000	12000	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"
 chr1	toy	exon	5000	5400	.	+	.	gene_id "G001"; gene_name "geneA"; transcript_id "G001.1"

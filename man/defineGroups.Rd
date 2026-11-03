@@ -15,7 +15,9 @@ defineGroups(
 )
 }
 \arguments{
-\item{perturbation, condition}{Tables from \code{\link[=deTable]{deTable()}}.}
+\item{perturbation, condition}{DE results: tables from \code{\link[=deTable]{deTable()}} or
+\code{\link[=readDE]{readDE()}}, or anything \code{readDE()} accepts (a DESeq2/edgeR/limma object
+or a results file), which is then read with default settings.}
 
 \item{targets}{Optional character vector restricting groups to these genes
 (for example genes with a binding peak).}

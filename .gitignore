@@ -8,3 +8,4 @@ doc/
 Meta/
 *.tar.gz
 LocusPick.Rcheck/
+.DS_Store

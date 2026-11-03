@@ -28,31 +28,53 @@ remotes::install_github("gevensen95/LocusPick", build_vignettes = TRUE)
 
 ## Quick start
 
+Pass your tools' output as it is:
+
 ```r
 library(LocusPick)
-ex <- locusPickExample()
+res <- locusPick(
+    peaks        = c("rep1_peaks.narrowPeak", "rep2_peaks.narrowPeak"),  # consensus
+    perturbation = DESeq2::results(dds_ko, contrast = c("genotype", "KO", "WT")),
+    condition    = "old_vs_young_edgeR.csv", conditionDirection = "old/young",
+    genes        = "gencode.vM25.annotation.gtf",
+    orgDb        = org.Mm.eg.db::org.Mm.eg.db,
+    signal       = list(CNR_young = c("y1.bw", "y2.bw"), CNR_old = c("o1.bw", "o2.bw")),
+    mappability  = "k50.Umap.MultiTrackMappability.bw")
+res                          # checks, QC, signal-change specificity, top loci
+plot(res, "Rad51b")
+reportLoci(res, "review.pdf")
+```
 
+Try it on the bundled example data:
+
+```r
+ex <- locusPickExample()
 cand   <- buildCandidates(ex$peaks, ex$genes, ex$groups,
                           signal = ex$signal, mappability = ex$mappability)
-qcSummary(cand)
-ranked <- rankLoci(cand, c(A_mean = 1, abs_lfc_perturbation = 1,
-                           abs_lfc_condition = 1))
-top    <- topLoci(ranked, n = 3)
-plotLocus(top[1, ], ex$signal, ex$genes,
-          trackGroups = list(Binding = c("A", "B")),
-          expression = ex$expression)
+ranked <- rankLoci(cand, c(A_mean = 1, abs_lfc_perturbation = 1, abs_lfc_condition = 1))
+plotLocus(topLoci(ranked, n = 1)[1, ], ex$signal, ex$genes,
+          trackGroups = list(Binding = c("A", "B")), expression = ex$expression)
 ```
 
 See `vignette("LocusPick")` for the full workflow and
-`vignette("preparing-inputs")` for ways to produce each input from BAM files,
-peak callers and DE tools.
+`vignette("preparing-inputs")` for every supported input format.
+
+## Documentation
+
+Rendered vignettes, readable without installing the package:
+
+| Vignette | Markdown | PDF |
+|---|---|---|
+| Choosing representative loci | [LocusPick.md](docs/vignettes/LocusPick.md) | [PDF](docs/vignettes/LocusPick.pdf) |
+| Preparing input data | [preparing-inputs.md](docs/vignettes/preparing-inputs.md) | [PDF](docs/vignettes/preparing-inputs.pdf) |
 
 ## Inputs
 
-| What | Accepted |
+| What | Accepted directly |
 |---|---|
-| Peaks | BED / narrowPeak path, `data.frame`, `GRanges` |
-| Gene models | GTF/GFF path or imported `GRanges` |
-| Signal | bigWig (path or URL), in-memory `GRanges`, chromDict, or any function |
+| DE results | DESeq2, edgeR, limma objects or tables; any CSV/TSV; Ensembl/Entrez IDs (with an OrgDb) |
+| Peaks | MACS2/MACS3, Genrich, SEACR, HOMER, DiffBind, nf-core consensus, BED; replicates merged to consensus |
+| Signal | bigWig or BAM, one or several per condition (averaged); nf-core results folders; chromDicts; any function |
+| Gene models | GTF/GFF path or `GRanges` |
+| Expression insets | `DESeqDataSet`, `DGEList`, `SummarizedExperiment`, or a matrix |
 | Mappability | Umap bigWig (`inst/scripts/make_umap_bw.sh` builds one) |
-| Expression | DE tables (any column names, via `deTable()`); long table for insets |

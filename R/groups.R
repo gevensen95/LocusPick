@@ -36,7 +36,9 @@ deTable <- function(df, gene = "gene", lfc = "log2FoldChange", padj = "padj") {
 #' that go down when the factor is removed are `activated` by the factor and
 #' genes that go up are `repressed`.
 #'
-#' @param perturbation,condition Tables from [deTable()].
+#' @param perturbation,condition DE results: tables from [deTable()] or
+#'   [readDE()], or anything `readDE()` accepts (a DESeq2/edgeR/limma object
+#'   or a results file), which is then read with default settings.
 #' @param targets Optional character vector restricting groups to these genes
 #'   (for example genes with a binding peak).
 #' @param alpha Adjusted p-value cut-off, applied to both contrasts.
@@ -58,8 +60,8 @@ defineGroups <- function(perturbation, condition, targets = NULL, alpha = 0.05,
                          minLFC = 0, perturbationType = c("loss", "gain"),
                          conditionName = "condition") {
     perturbationType <- match.arg(perturbationType)
-    .stopIfMissingCols(perturbation, c("gene", "lfc", "padj"), "perturbation")
-    .stopIfMissingCols(condition, c("gene", "lfc", "padj"), "condition")
+    perturbation <- .asDE(perturbation)
+    condition <- .asDE(condition)
     minLFC <- rep_len(minLFC, 2)
 
     sigP <- perturbation[perturbation$padj <= alpha & abs(perturbation$lfc) > minLFC[1], ]
@@ -79,4 +81,11 @@ defineGroups <- function(perturbation, condition, targets = NULL, alpha = 0.05,
     m[order(m$group, m$gene),
       c("gene", "regulation", "condition_dir", "group", "lfc_perturbation",
         "padj_perturbation", "lfc_condition", "padj_condition")]
+}
+
+.asDE <- function(x) {
+    if (is.data.frame(x) && identical(sort(intersect(names(x), c("gene", "lfc", "padj"))),
+                                      c("gene", "lfc", "padj")))
+        return(x)
+    readDE(x)
 }

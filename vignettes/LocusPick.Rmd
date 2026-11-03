@@ -32,10 +32,46 @@ LocusPick turns the selection into an explicit pipeline. Every candidate and
 every quality flag is kept in a table, and the ranking weights can be stated in
 a figure legend.
 
-## Workflow
+## Quick start: one call
+
+`locusPick()` takes the direct output of the usual tools (DESeq2, edgeR or
+limma results; MACS2, SEACR, HOMER or DiffBind peaks; bigWig or BAM files),
+checks the inputs, and returns ranked candidates:
 
 ```{r}
 library(LocusPick)
+f <- function(x) system.file("extdata", x, package = "LocusPick")
+de <- read.delim(f("toy_de.tsv"))
+
+# stand-ins for a DESeq2 table and an edgeR table
+ko_deseq2 <- data.frame(gene = de$gene, log2FoldChange = de$ko_lfc, padj = de$ko_padj)
+age_edger <- data.frame(gene = de$gene, logFC = de$cond_lfc, FDR = de$cond_padj)
+
+res <- locusPick(
+    peaks        = f("toy_peaks.bed"),
+    perturbation = ko_deseq2,  perturbationDirection = "KO/WT",
+    condition    = age_edger,  conditionDirection    = "old/young",
+    genes        = f("toy.gtf"),
+    signal       = list(CNR_young = f("toy_A.bw"), CNR_old = f("toy_B.bw")),
+    mappability  = f("toy_map.bw"))
+res
+```
+
+```{r}
+plot(res, "geneA")
+```
+
+`reportLoci(res, "review.pdf")` writes every top locus to a PDF and the full
+candidate table to a TSV. With real data you would pass DESeq2/edgeR objects
+or files directly; see `vignette("preparing-inputs", package = "LocusPick")`
+for every supported format.
+
+The rest of this vignette walks through the same steps one function at a
+time, which gives full control over each.
+
+## Step by step
+
+```{r}
 ex <- locusPickExample()
 ```
 
@@ -200,39 +236,35 @@ age$gene <- h(age$gene)
 
 ## A complete example
 
-The workflow below reproduces a CUT&RUN analysis of a liver transcription factor
-in young and old mice, with a hepatocyte knockout as the perturbation:
+A CUT&RUN analysis of a liver transcription factor in young and old mice, with
+a hepatocyte knockout as the perturbation, starting from pipeline outputs:
 
 ```{r, eval = FALSE}
-h <- function(s) harmonizeSymbols(s, org.Mm.eg.db::org.Mm.eg.db)
-genes <- readGeneModels("mm10.gtf", harmonize = h)
+library(org.Mm.eg.db)
 
-ko  <- deTable(read.delim("ko_vs_control.tsv"), gene = "Gene",
-               lfc = "log2FC", padj = "FDR")
-age <- deTable(read.delim("old_vs_young.tsv"), gene = "Gene",
-               lfc = "log2FoldChange", padj = "padj")
-ko$gene <- h(ko$gene); age$gene <- h(age$gene)
-groups <- defineGroups(ko, age, conditionName = "age")
+# signal and peaks from an nf-core/cutandrun results folder
+out <- findPipelineOutputs("cutandrun_results/")
+cnr <- signalFromFiles(out, c(young = "^Y", old = "^O"))     # replicates averaged
+peaks <- out$file[out$type == "peaks" & out$caller == "seacr" &
+                  grepl("^Y", out$sample) & !out$control]
 
-signal <- list(CNR_young = "cnr_young.bw", CNR_old = "cnr_old.bw",
-               ATAC_young = "atac_young.bw", ATAC_old = "atac_old.bw")
-cand <- buildCandidates("young_consensus_peaks.bed", genes, groups,
-                        signal = signal,
-                        mappability = "k50.Umap.MultiTrackMappability.bw",
-                        requireSignal = c("CNR_young", "CNR_old"))
-qcSummary(cand)
+res <- locusPick(
+    peaks        = peaks,                       # replicates -> consensus (>= 2)
+    blacklist    = "mm10-blacklist.v2.bed.gz",
+    perturbation = ko_results,                  # DESeq2 results: KO vs WT
+    condition    = "old_vs_young_edgeR.csv",    conditionDirection = "old/young",
+    genes        = "gencode.vM25.annotation.gtf",
+    orgDb        = org.Mm.eg.db,                # Ensembl IDs, outdated symbols
+    signal       = list(CNR_young = cnr$young, CNR_old = cnr$old,
+                        ATAC_young = c("atac_y1.bw", "atac_y2.bw"),
+                        ATAC_old   = c("atac_o1.bw", "atac_o2.bw")),
+    mappability  = "k50.Umap.MultiTrackMappability.bw",
+    expression   = list(expressionFrom(dds_ko,  "genotype", panel = "Knockout"),
+                        expressionFrom(dds_age, "age",      panel = "Aging")),
+    conditionName = "age")
 
-cand$CNR_loss <- cand$CNR_young_mean - cand$CNR_old_mean
-w <- c(CNR_young_mean = 1, CNR_loss = 1,
-       abs_lfc_perturbation = 1, abs_lfc_condition = 1)
-ranked <- rankLoci(cand, w)
-signalShift(ranked, "CNR_young_mean", "CNR_old_mean",
-            background = signalAtPeaks("young_consensus_peaks.bed", signal[1:2]))
-
-reportLoci(topLoci(ranked, n = 10), "review.pdf", signal = signal, genes = genes,
-           trackGroups = list(`CUT&RUN` = c("CNR_young", "CNR_old"),
-                              ATAC = c("ATAC_young", "ATAC_old")),
-           candidates = ranked)
+res$checks; res$qc; res$shift
+reportLoci(res, "review.pdf")
 ```
 
 ## Reporting

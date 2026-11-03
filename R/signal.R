@@ -148,7 +148,12 @@ fetchSignal <- function(source, which) {
 
 .asSource <- function(x) {
     if (inherits(x, "locusSignal")) return(x)
-    if (is.character(x) && length(x) == 1) return(bigWigSource(x))
+    if (is.character(x) && length(x) > 1) return(.fileSource(x))
+    if (is.list(x) && !is(x, "GRanges") && length(x) > 1 &&
+        all(vapply(x, function(e) inherits(e, "locusSignal") || is.character(e), logical(1))))
+        return(meanSource(lapply(x, .asSource)))
+    if (is.character(x) && length(x) == 1)
+        return(if (grepl("\\.bam$", x, ignore.case = TRUE)) bamSource(x) else bigWigSource(x))
     if (is(x, "GRanges")) return(rangesSource(x))
     if (is.function(x)) return(functionSource(x))
     stop("Cannot use object of class '", class(x)[1], "' as a signal source.",
@@ -224,4 +229,126 @@ signalAtPeaks <- function(peaks, sources, missingAsZero = FALSE) {
 #' @export
 mappabilityAtPeaks <- function(peaks, mappability) {
     signalAtPeaks(peaks, list(map = mappability), missingAsZero = TRUE)$map_mean
+}
+
+#' Average several signal sources
+#'
+#' Combines replicate tracks into one condition track by averaging their
+#' scores base by base. Bases missing from a replicate count as 0 for that
+#' replicate; bases missing from all replicates stay missing.
+#'
+#' A character vector of several files, or a list of sources, passed as one
+#' element of a `signal` list is averaged automatically, so
+#' `signal = list(young = c("y1.bw", "y2.bw"))` works directly.
+#'
+#' @param sources A list of signal sources or file paths.
+#' @return A `locusSignal` source.
+#' @examples
+#' bw <- system.file("extdata", c("toy_A.bw", "toy_B.bw"), package = "LocusPick")
+#' m <- meanSource(as.list(bw))
+#' fetchSignal(m, GenomicRanges::GRanges("chr1:5000-5040"))
+#' @export
+meanSource <- function(sources) {
+    srcs <- lapply(sources, .asSource)
+    n <- length(srcs)
+    .newSource(function(which) {
+        w <- GenomicRanges::reduce(which, ignore.strand = TRUE)
+        sigs <- lapply(srcs, function(s) {
+            g <- s$fetch(w)
+            g <- .matchSeqStyle(g, w)
+            GenomicRanges::strand(g) <- "*"
+            g
+        })
+        sigs <- sigs[lengths(sigs) > 0]
+        if (!length(sigs)) return(.emptySignal())
+        d <- GenomicRanges::disjoin(do.call(c, lapply(sigs, GenomicRanges::granges)))
+        tot <- numeric(length(d))
+        for (s in sigs) {
+            h <- GenomicRanges::findOverlaps(d, s)
+            add <- tapply(s$score[S4Vectors::subjectHits(h)], S4Vectors::queryHits(h), mean)
+            idx <- as.integer(names(add))
+            tot[idx] <- tot[idx] + add
+        }
+        d$score <- tot / n
+        d
+    }, paste0("mean of ", n, " tracks"))
+}
+
+#' Signal computed from a BAM file
+#'
+#' Computes CPM-normalized fragment coverage directly from an indexed BAM, only
+#' over the regions requested. Useful for exploring data before bigWigs exist.
+#' For figures, bigWigs made with deepTools (`bamCoverage`) give more control
+#' (blacklists, extension, normalization) and are much faster.
+#'
+#' @param path Indexed BAM file (`.bai` alongside).
+#' @param paired `TRUE`/`FALSE`, or `NULL` to detect from the file.
+#' @param fragmentLength Single-end only: extend reads to this length.
+#' @param minMapq Minimum mapping quality.
+#' @param removeDuplicates Drop reads flagged as duplicates.
+#' @param normalize `"CPM"` (per million mapped fragments) or `"none"`.
+#' @return A `locusSignal` source.
+#' @examples
+#' bam <- system.file("extdata", "toy.bam", package = "LocusPick")
+#' if (requireNamespace("Rsamtools", quietly = TRUE) &&
+#'     requireNamespace("GenomicAlignments", quietly = TRUE)) {
+#'     src <- bamSource(bam)
+#'     fetchSignal(src, GenomicRanges::GRanges("chr1:4900-5000"))
+#' }
+#' @export
+bamSource <- function(path, paired = NULL, fragmentLength = NULL, minMapq = 10,
+                      removeDuplicates = TRUE, normalize = c("CPM", "none")) {
+    normalize <- match.arg(normalize)
+    .requirePkg("Rsamtools", "to read BAM files")
+    .requirePkg("GenomicAlignments", "to read BAM files")
+    if (!file.exists(path)) stop("BAM not found: ", path, call. = FALSE)
+    if (!file.exists(paste0(path, ".bai")) && !file.exists(sub("\\.bam$", ".bai", path)))
+        stop("BAM index (.bai) not found for ", path,
+             ". Create it with Rsamtools::indexBam() or samtools index.", call. = FALSE)
+    if (is.null(paired)) paired <- Rsamtools::testPairedEndBam(path)
+    mapped <- sum(Rsamtools::idxstatsBam(path)$mapped)
+    nFrag <- if (paired) mapped / 2 else mapped
+    scale <- if (normalize == "CPM") 1e6 / nFrag else 1
+    message("BAM signal for ", basename(path), ": ", if (paired) "paired" else "single",
+            "-end, ", normalize, ", MAPQ >= ", minMapq,
+            if (removeDuplicates) ", duplicates removed" else "",
+            ". For figures, bigWigs from deepTools bamCoverage are recommended.")
+    lv <- GenomeInfoDb::seqlevels(Rsamtools::BamFile(path))
+
+    .newSource(function(which) {
+        w <- GenomicRanges::reduce(which, ignore.strand = TRUE)
+        w <- .matchSeqStyle(w, GenomicRanges::GRanges(lv, IRanges::IRanges(1, 1)))
+        w <- w[as.character(GenomicRanges::seqnames(w)) %in% lv]
+        if (!length(w)) return(.emptySignal())
+        flag <- Rsamtools::scanBamFlag(
+            isUnmappedQuery = FALSE, isSecondaryAlignment = FALSE,
+            isNotPassingQualityControls = FALSE,
+            isDuplicate = if (removeDuplicates) FALSE else NA,
+            isProperPair = if (paired) TRUE else NA)
+        prm <- Rsamtools::ScanBamParam(which = w, flag = flag, mapqFilter = minMapq)
+        fr <- if (paired) {
+            GenomicRanges::granges(GenomicAlignments::readGAlignmentPairs(
+                path, param = prm, use.names = TRUE), on.discordant.seqnames = "drop")
+        } else {
+            g <- GenomicRanges::granges(GenomicAlignments::readGAlignments(
+                path, param = prm, use.names = TRUE))
+            if (!is.null(fragmentLength)) g <- GenomicRanges::resize(g, fragmentLength, fix = "start")
+            g
+        }
+        # a read spanning two requested regions is returned once per region
+        fr <- fr[!duplicated(paste(names(fr), GenomicRanges::start(fr), GenomicRanges::end(fr)))]
+        GenomicRanges::strand(fr) <- "*"
+        GenomeInfoDb::seqlevels(fr, pruning.mode = "coarse") <- lv
+        GenomeInfoDb::seqlevels(w) <- lv
+        cov <- GenomicRanges::coverage(fr) * scale
+        runs <- methods::as(cov, "GRanges")
+        h <- GenomicRanges::findOverlaps(runs, w)
+        out <- GenomicRanges::pintersect(runs[S4Vectors::queryHits(h)], w[S4Vectors::subjectHits(h)])
+        out$score <- runs$score[S4Vectors::queryHits(h)]
+        S4Vectors::mcols(out) <- S4Vectors::mcols(out)["score"]
+        # regions beyond the last read on a chromosome: zero coverage
+        miss <- GenomicRanges::setdiff(w, out)
+        if (length(miss)) { miss$score <- 0; out <- c(out, miss) }
+        sort(out)
+    }, paste("BAM:", basename(path)))
 }

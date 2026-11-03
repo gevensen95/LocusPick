@@ -15,7 +15,9 @@ reportLoci(
 )
 }
 \arguments{
-\item{loci}{Rows to plot (e.g. from \code{\link[=topLoci]{topLoci()}}).}
+\item{loci}{Rows to plot (e.g. from \code{\link[=topLoci]{topLoci()}}), or a \code{LocusPickResult}
+from \code{\link[=locusPick]{locusPick()}}, in which case its top loci, tracks and expression are
+used and the full candidate table is written alongside.}
 
 \item{file}{Output PDF path.}
 

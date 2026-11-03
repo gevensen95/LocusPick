@@ -98,3 +98,25 @@ ex$value <- round(ex$value, 1)
 write.table(ex, file.path(out, "toy_expression.tsv"), sep = "\t", quote = FALSE,
             row.names = FALSE)
 message("Wrote example data to ", out)
+
+## small paired-end BAM (fragments piled up at peak1 and peak2) ----------------
+if (requireNamespace("Rsamtools", quietly = TRUE)) {
+    set.seed(7)
+    frag <- function(center, n) round(rnorm(n, center, 60)) - 75L
+    starts <- c(frag(5050, 300), frag(20050, 150), sample(1:59800, 200))
+    rl <- 50L; fl <- 150L
+    flagDup <- c(rep(FALSE, length(starts) - 20), rep(TRUE, 20))     # 20 duplicates
+    mapq <- ifelse(seq_along(starts) %% 25 == 0, 0L, 40L)          # some MAPQ 0
+    seqs <- vapply(seq_along(starts), function(i)
+        paste(sample(c("A", "C", "G", "T"), rl, TRUE), collapse = ""), "")
+    qual <- strrep("I", rl)
+    r1 <- sprintf("frag%d\t%d\tchr1\t%d\t%d\t%dM\t=\t%d\t%d\t%s\t%s",
+                  seq_along(starts), 99L + 1024L * flagDup, starts, mapq, rl,
+                  starts + fl - rl, fl, seqs, qual)
+    r2 <- sprintf("frag%d\t%d\tchr1\t%d\t%d\t%dM\t=\t%d\t%d\t%s\t%s",
+                  seq_along(starts), 147L + 1024L * flagDup, starts + fl - rl, mapq, rl,
+                  starts, -fl, seqs, qual)
+    sam <- file.path(tempdir(), "toy.sam")
+    writeLines(c("@HD\tVN:1.6\tSO:unsorted", "@SQ\tSN:chr1\tLN:60000", r1, r2), sam)
+    Rsamtools::asBam(sam, file.path(out, "toy"), overwrite = TRUE, indexDestination = TRUE)
+}

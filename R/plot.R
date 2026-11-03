@@ -237,7 +237,9 @@ plotLocus <- function(locus, signal, genes, trackGroups = NULL, colors = NULL,
 #' Plots each locus on its own PDF page and, optionally, writes the full
 #' candidate table. A locus that fails to plot is reported and skipped.
 #'
-#' @param loci Rows to plot (e.g. from [topLoci()]).
+#' @param loci Rows to plot (e.g. from [topLoci()]), or a `LocusPickResult`
+#'   from [locusPick()], in which case its top loci, tracks and expression are
+#'   used and the full candidate table is written alongside.
 #' @param file Output PDF path.
 #' @param ... Passed to [plotLocus()] (`signal`, `genes`, ...).
 #' @param candidates Optional full candidate table to write as TSV.
@@ -253,6 +255,15 @@ plotLocus <- function(locus, signal, genes, trackGroups = NULL, colors = NULL,
 #' @export
 reportLoci <- function(loci, file, ..., candidates = NULL, tsv = NULL,
                        width = 9, height = 6) {
+    if (inherits(loci, "LocusPickResult")) {
+        res <- loci
+        if (is.null(res$signal)) stop("No signal tracks in this result.", call. = FALSE)
+        if (is.null(candidates)) candidates <- res$candidates
+        return(reportLoci(res$top, file, signal = res$signal, genes = res$genes,
+                          trackGroups = res$trackGroups, expression = res$expression,
+                          ..., candidates = candidates, tsv = tsv,
+                          width = width, height = height))
+    }
     if (!is.null(candidates)) {
         if (is.null(tsv)) tsv <- sub("\\.pdf$", "_candidates.tsv", file)
         utils::write.table(candidates, tsv, sep = "\t", quote = FALSE, row.names = FALSE)
