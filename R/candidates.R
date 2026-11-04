@@ -36,10 +36,25 @@
 #'   another gene's promoter peak as an example; `"all"` links it to every
 #'   gene within `maxDist`. `n_nearby_genes` records how many genes were in
 #'   range, so crowded loci can be spotted either way.
+#' @param replicates Optional replicate tracks for a two-condition
+#'   comparison: a list of two elements named by condition (e.g.
+#'   `list(young = c("y1.bw", "y2.bw"), old = c("o1.bw", "o2.bw"))`), each a
+#'   vector or list of signal sources, one per replicate. For every peak, the
+#'   change between conditions is computed for each pair of replicates (first
+#'   condition minus second) and compared with the sign of the change between
+#'   replicate means. `rep_diff` is that mean change and `rep_agreement` the
+#'   fraction of replicate pairs agreeing with its sign. A peak is
+#'   `reproducible` when `rep_agreement >= minReproducible`, and only
+#'   reproducible peaks are eligible. Use it when the example is meant to show
+#'   a change in signal: a locus whose change flips between replicates does not
+#'   illustrate one.
+#' @param minReproducible Minimum `rep_agreement` (default 1: every replicate
+#'   pair agrees).
 #' @return A `data.frame` with peak coordinates, `gene`, group columns, signal
 #'   columns (`<track>_mean`, `<track>_cov`), `mappability`, absolute fold
 #'   changes, and the flags `gene_in_models`, `near_gene`, `mappable`,
-#'   `has_signal` and `eligible`.
+#'   `has_signal` and `eligible`; with `replicates`, also `rep_diff`,
+#'   `rep_agreement` and `reproducible`.
 #' @examples
 #' ex <- locusPickExample()
 #' cand <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal,
@@ -50,7 +65,8 @@ buildCandidates <- function(peaks, genes, groups = NULL, signal = NULL,
                             mappability = NULL, geneCol = NULL, links = NULL,
                             maxDist = 5000, maxLinkDist = 5e5, minMappability = 0.8,
                             minCoverage = 0.5, requireSignal = names(signal),
-                            assignMode = c("nearest", "all")) {
+                            assignMode = c("nearest", "all"), replicates = NULL,
+                            minReproducible = 1) {
     assignMode <- match.arg(assignMode)
     pk <- asPeaks(peaks)
     gm <- .asGeneModels(genes)
@@ -112,18 +128,50 @@ buildCandidates <- function(peaks, genes, groups = NULL, signal = NULL,
         cand$mappability <- NA_real_
         cand$mappable <- TRUE
     }
+    if (!is.null(replicates)) {
+        ra <- .replicateAgreement(upk, replicates)
+        cand <- merge(cand, ra, by = "peak_id", all.x = TRUE)
+        cand$reproducible <- !is.na(cand$rep_agreement) & cand$rep_agreement >= minReproducible
+    }
     if ("lfc_perturbation" %in% names(cand))
         cand$abs_lfc_perturbation <- abs(cand$lfc_perturbation)
     if ("lfc_condition" %in% names(cand))
         cand$abs_lfc_condition <- abs(cand$lfc_condition)
 
     cand$eligible <- cand$gene_in_models & cand$near_gene & cand$mappable & cand$has_signal
+    if (!is.null(replicates)) cand$eligible <- cand$eligible & cand$reproducible
     cand <- cand[order(cand$group, cand$gene, cand$peak_id), ]
     rownames(cand) <- NULL
     attr(cand, "settings") <- list(maxDist = maxDist, minMappability = minMappability,
                                    minCoverage = minCoverage,
-                                   requireSignal = requireSignal)
+                                   requireSignal = requireSignal,
+                                   replicates = if (!is.null(replicates)) names(replicates),
+                                   minReproducible = minReproducible)
     cand
+}
+
+.replicateAgreement <- function(pk, replicates) {
+    if (!is.list(replicates) || length(replicates) != 2 || is.null(names(replicates)) ||
+        any(names(replicates) == ""))
+        stop("replicates must be a list of two named elements (one per condition), ",
+             "each holding the replicate tracks.", call. = FALSE)
+    reps <- lapply(replicates, function(r) if (is.list(r)) r else as.list(r))
+    if (any(lengths(reps) < 1)) stop("Each condition needs at least one replicate track.", call. = FALSE)
+    if (all(lengths(reps) < 2))
+        warning("Only one replicate per condition: rep_agreement is 0 or 1 by construction.",
+                call. = FALSE)
+    vals <- lapply(reps, function(r) {
+        names(r) <- paste0("r", seq_along(r))
+        s <- signalAtPeaks(pk, r)
+        as.matrix(s[, paste0(names(r), "_mean"), drop = FALSE])
+    })
+    A <- vals[[1]]; B <- vals[[2]]
+    d <- rowMeans(A) - rowMeans(B)
+    pairs <- expand.grid(i = seq_len(ncol(A)), j = seq_len(ncol(B)))
+    agree <- vapply(seq_len(nrow(pairs)), function(k)
+        sign(A[, pairs$i[k]] - B[, pairs$j[k]]) == sign(d) & sign(d) != 0, logical(nrow(A)))
+    agree <- matrix(agree, nrow = nrow(A))
+    data.frame(peak_id = pk$peak_id, rep_diff = d, rep_agreement = rowMeans(agree))
 }
 
 #' Summarize quality-control flags
@@ -148,6 +196,8 @@ qcSummary <- function(cand) {
                    fail_near_gene = sum(d$gene_in_models & !d$near_gene),
                    fail_mappable = sum(!d$mappable),
                    fail_has_signal = sum(!d$has_signal),
+                   fail_reproducible = if ("reproducible" %in% names(d))
+                       sum(!d$reproducible) else NA_integer_,
                    eligible = sum(d$eligible),
                    eligible_genes = length(unique(d$gene[d$eligible])))
     }))
