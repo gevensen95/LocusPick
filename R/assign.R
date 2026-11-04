@@ -91,21 +91,27 @@ checkAssignment <- function(peaks, genes, geneCol = "gene", maxDist = 5000) {
     gm <- .asGeneModels(genes)
     if (!geneCol %in% colnames(S4Vectors::mcols(pk)))
         stop("Peaks have no column '", geneCol, "'.", call. = FALSE)
-    g <- .matchSeqStyle(gm$genes, pk)
     gname <- as.character(S4Vectors::mcols(pk)[[geneCol]])
-    pchr <- as.character(GenomicRanges::seqnames(pk))
-    gchr <- as.character(GenomicRanges::seqnames(g))
-
-    dist <- rep(NA_real_, length(pk))
-    idx <- split(seq_along(g), paste(g$gene_name, gchr, sep = "\r"))
-    key <- paste(gname, pchr, sep = "\r")
-    for (i in which(key %in% names(idx))) {
-        d <- GenomicRanges::distance(pk[i], g[idx[[key[i]]]], ignore.strand = TRUE)
-        dist[i] <- min(d, na.rm = TRUE)
-    }
+    dist <- .distToGene(pk, gname, gm)
     data.frame(peak_id = pk$peak_id, gene = gname,
-               gene_in_models = gname %in% g$gene_name,
+               gene_in_models = gname %in% gm$genes$gene_name,
                distance = dist,
                near_gene = !is.na(dist) & dist <= maxDist,
                stringsAsFactors = FALSE)
+}
+
+# Distance from each region to the body of its assigned gene on the same
+# chromosome (NA if that gene is not on the chromosome). Vectorized.
+.distToGene <- function(gr, gene, gm) {
+    g <- .matchSeqStyle(gm$genes, gr)
+    gkey <- paste(g$gene_name, GenomicRanges::seqnames(g), sep = "\r")
+    key <- paste(gene, GenomicRanges::seqnames(gr), sep = "\r")
+    j <- match(key, gkey)
+    d <- rep(NA_real_, length(gr))
+    ok <- !is.na(j)
+    if (any(ok)) {
+        d[ok] <- GenomicRanges::distance(gr[ok], g[j[ok]], ignore.strand = TRUE)
+        d[ok & is.na(d)] <- 0
+    }
+    d
 }

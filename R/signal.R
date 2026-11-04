@@ -337,18 +337,35 @@ bamSource <- function(path, paired = NULL, fragmentLength = NULL, minMapq = 10,
         }
         # a read spanning two requested regions is returned once per region
         fr <- fr[!duplicated(paste(names(fr), GenomicRanges::start(fr), GenomicRanges::end(fr)))]
-        GenomicRanges::strand(fr) <- "*"
-        GenomeInfoDb::seqlevels(fr, pruning.mode = "coarse") <- lv
-        GenomeInfoDb::seqlevels(w) <- lv
-        cov <- GenomicRanges::coverage(fr) * scale
-        runs <- methods::as(cov, "GRanges")
-        h <- GenomicRanges::findOverlaps(runs, w)
-        out <- GenomicRanges::pintersect(runs[S4Vectors::queryHits(h)], w[S4Vectors::subjectHits(h)])
-        out$score <- runs$score[S4Vectors::queryHits(h)]
-        S4Vectors::mcols(out) <- S4Vectors::mcols(out)["score"]
-        # regions beyond the last read on a chromosome: zero coverage
-        miss <- GenomicRanges::setdiff(w, out)
-        if (length(miss)) { miss$score <- 0; out <- c(out, miss) }
-        sort(out)
+        names(fr) <- NULL
+        .coverageRuns(fr, w, scale, lv)
     }, paste("BAM:", basename(path)))
+}
+
+#' Rescale a signal source
+#'
+#' Multiplies every score of a source by a constant. Use it to apply a
+#' normalization that the track does not already carry, for example a
+#' spike-in factor to a CPM bigWig (`factor = total_reads / spikein_reads`
+#' turns reads per million total reads into reads per million spike-in reads),
+#' or a DESeq2/DiffBind size factor.
+#'
+#' @param source A signal source or file path.
+#' @param factor A single positive number.
+#' @param label Optional label shown when the source is printed.
+#' @return A `locusSignal` source.
+#' @examples
+#' bw <- system.file("extdata", "toy_A.bw", package = "LocusPick")
+#' s <- scaleSource(bw, 0.5)
+#' fetchSignal(s, GenomicRanges::GRanges("chr1:5000-5040"))
+#' @export
+scaleSource <- function(source, factor, label = NULL) {
+    if (!is.numeric(factor) || length(factor) != 1 || !is.finite(factor) || factor <= 0)
+        stop("factor must be a single positive number.", call. = FALSE)
+    src <- .asSource(source)
+    .newSource(function(which) {
+        g <- src$fetch(which)
+        if (length(g)) g$score <- g$score * factor
+        g
+    }, if (is.null(label)) sprintf("%s x %.4g", src$label, factor) else label)
 }

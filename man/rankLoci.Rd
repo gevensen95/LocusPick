@@ -18,7 +18,11 @@ to use different criteria for different groups.}
 }
 \value{
 \code{cand} with \code{score} and \code{rank} (within group; 1 is best), sorted by
-group and rank. Ineligible candidates get \code{NA}.
+group and rank, plus one \verb{pct_<column>} per weighted column: the percentile
+(0-1, higher value = higher percentile, whatever the weight's sign) of the
+candidate's value among its group's eligible candidates. These show how
+typical or extreme a pick is and can be reported with a figure.
+Ineligible candidates get \code{NA}.
 }
 \description{
 Scores eligible candidates within each group as a weighted mean of

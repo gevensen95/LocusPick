@@ -6,8 +6,8 @@
 \usage{
 locusPick(
   peaks,
-  perturbation,
-  condition,
+  perturbation = NULL,
+  condition = NULL,
   genes,
   signal = NULL,
   mappability = NULL,
@@ -21,7 +21,9 @@ locusPick(
   minLFC = 0,
   perturbationType = c("loss", "gain"),
   conditionName = "condition",
+  links = NULL,
   maxDist = 5000,
+  maxLinkDist = 5e+05,
   minMappability = 0.8,
   minCoverage = 0.5,
   geneCol = NULL,
@@ -36,7 +38,10 @@ locusPick(
 merged into consensus peaks.}
 
 \item{perturbation, condition}{DE results (see \code{\link[=readDE]{readDE()}}): DESeq2, edgeR or
-limma objects or tables. Fold changes must be test / reference.}
+limma objects or tables. Fold changes must be test / reference. Either
+or both may be omitted: with one contrast, groups follow its direction
+(see \code{\link[=defineGroups]{defineGroups()}}); with none, all linked genes form one group and
+loci are ranked on signal alone.}
 
 \item{genes}{Gene models: GTF path, \code{GRanges}, or \code{\link[=readGeneModels]{readGeneModels()}} output.}
 
@@ -63,8 +68,10 @@ the contrast directions of plain tables, e.g. \code{"KO/WT"}, \code{"old/young"}
 \item{alpha, minLFC, perturbationType, conditionName}{Passed to
 \code{\link[=defineGroups]{defineGroups()}}.}
 
-\item{maxDist, minMappability, minCoverage, geneCol, assignMode}{Passed to
-\code{\link[=buildCandidates]{buildCandidates()}}.}
+\item{links}{Optional peak-gene links (e.g. \code{Signac::Links()}), used
+instead of distance-based assignment; see \code{\link[=buildCandidates]{buildCandidates()}}.}
+
+\item{maxDist, maxLinkDist, minMappability, minCoverage, geneCol, assignMode}{Passed to \code{\link[=buildCandidates]{buildCandidates()}}.}
 
 \item{minReps, blacklist}{Passed to \code{\link[=readPeaks]{readPeaks()}}.}
 

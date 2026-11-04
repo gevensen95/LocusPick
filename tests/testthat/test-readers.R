@@ -239,3 +239,12 @@ test_that("locusPick runs end to end and its outputs plot", {
     expect_true(all(ok))
     expect_true(file.exists(sub("\\.pdf$", "_candidates.tsv", pdf)))
 })
+
+test_that("scaleSource multiplies scores and rejects bad factors", {
+    bw <- system.file("extdata", "toy_A.bw", package = "LocusPick")
+    w <- GenomicRanges::GRanges("chr1:5000-5040")
+    a <- fetchSignal(bw, w); b <- fetchSignal(scaleSource(bw, 2.5), w)
+    expect_equal(b$score, a$score * 2.5)
+    expect_error(scaleSource(bw, 0), "positive")
+    expect_error(scaleSource(bw, c(1, 2)), "single")
+})

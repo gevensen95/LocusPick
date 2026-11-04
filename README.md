@@ -56,8 +56,20 @@ plotLocus(topLoci(ranked, n = 1)[1, ], ex$signal, ex$genes,
           trackGroups = list(Binding = c("A", "B")), expression = ex$expression)
 ```
 
-See `vignette("LocusPick")` for the full workflow and
-`vignette("preparing-inputs")` for every supported input format.
+Single-cell multiome or scRNA + scATAC data:
+
+```r
+res <- scLocusPick(seurat_obj, cellType = "cell_type", sample = "sample",
+                   perturbation = c("genotype", "KO", "WT"),
+                   condition = c("age", "old", "young"),
+                   genes = "gencode.vM25.annotation.gtf")
+```
+
+Either contrast can be omitted, or both (rank on signal alone).
+
+See `vignette("LocusPick")` for the full workflow, `vignette("preparing-inputs")`
+for every supported input format, and `vignette("single-cell")` for single-cell
+data.
 
 ## Documentation
 
@@ -67,6 +79,7 @@ Rendered vignettes, readable without installing the package:
 |---|---|---|
 | Choosing representative loci | [LocusPick.md](docs/vignettes/LocusPick.md) | [PDF](docs/vignettes/LocusPick.pdf) |
 | Preparing input data | [preparing-inputs.md](docs/vignettes/preparing-inputs.md) | [PDF](docs/vignettes/preparing-inputs.pdf) |
+| Single-cell data | [single-cell.md](docs/vignettes/single-cell.md) | [PDF](docs/vignettes/single-cell.pdf) |
 
 ## Inputs
 
@@ -78,3 +91,4 @@ Rendered vignettes, readable without installing the package:
 | Gene models | GTF/GFF path or `GRanges` |
 | Expression insets | `DESeqDataSet`, `DGEList`, `SummarizedExperiment`, or a matrix |
 | Mappability | Umap bigWig (`inst/scripts/make_umap_bw.sh` builds one) |
+| Single cell | Seurat + Signac, `SingleCellExperiment`, Cell Ranger / ATAC / ARC folders, matrices; fragments files; peak-gene links |

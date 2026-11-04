@@ -7,6 +7,8 @@
 #' * `DGEList`: counts per million.
 #' * `SummarizedExperiment`: the first assay, or the one named by `assay`.
 #' * matrix or `data.frame` of genes × samples: used as is.
+#' * [pseudobulk()] result: counts per million, one panel per cell type
+#'   (`panel` is then used as a suffix, e.g. `"Hepatocyte expression"`).
 #'
 #' @param x An expression object or matrix (genes in rows, samples in columns).
 #' @param group Sample groups: a column name of the sample annotation
@@ -25,6 +27,21 @@
 expressionFrom <- function(x, group, panel = "Expression", levels = NULL,
                            orgDb = NULL, assay = NULL) {
     sampleInfo <- NULL
+    if (inherits(x, "LocusPickPseudobulk")) {
+        .stopIfMissingCols(x$colData, if (length(group) == 1) group, "pseudobulk annotation")
+        out <- lapply(split(seq_len(ncol(x$counts)), x$colData$cell_type), function(i) {
+            m <- x$counts[, i, drop = FALSE]
+            cpm <- t(t(m) / colSums(m)) * 1e6
+            g <- if (length(group) == 1) x$colData[[group]][i] else group[i]
+            expressionFrom(cpm, group = g, levels = levels, orgDb = orgDb,
+                           panel = paste(x$colData$cell_type[i][1],
+                                         if (panel == "Expression") "" else panel))
+        })
+        out <- do.call(rbind, out)
+        out$panel <- trimws(out$panel)
+        rownames(out) <- NULL
+        return(out)
+    }
     if (is(x, "DESeqDataSet")) {
         sf <- .requireCall("DESeq2", "sizeFactors")(x)
         if (is.null(sf)) x <- .requireCall("DESeq2", "estimateSizeFactors")(x)

@@ -94,7 +94,9 @@ and naming mismatches that otherwise fail silently.
 | `DESeqDataSet`, `DGEList`                                    | `expressionFrom()`                           | normalized counts / CPM for insets        |
 
 `locusPick()` calls these for you, so a full run can be one call (see
-`vignette("LocusPick")`). Every reader prints what it detected, so you
+`vignette("LocusPick")`). For single-cell data (Seurat/Signac,
+`SingleCellExperiment`, Cell Ranger folders) see
+`vignette("single-cell")`. Every reader prints what it detected, so you
 can confirm it.
 
 ### Differential expression
@@ -113,7 +115,8 @@ dds <- DESeq2::DESeq(DESeq2::DESeqDataSetFromMatrix(counts, samples, ~ genotype)
 res <- DESeq2::results(dds, contrast = c("genotype", "KO", "WT"))
 
 ko <- readDE(res)
-#> res: DESeq2 results | lfc = 'log2FoldChange', padj = 'padj', gene = row names (symbol IDs) | 100 genes
+#> res: DESeq2 results | lfc = 'log2FoldChange', padj = 'padj', gene = row names
+#>   (symbol IDs) | 100 genes
 #>   contrast: genotype KO vs WT
 head(ko, 3)
 #>     gene      lfc         padj
@@ -130,7 +133,8 @@ so state it:
 csv <- file.path(td, "ko_vs_wt.csv")
 write.csv(as.data.frame(res), csv)
 ko <- readDE(csv, direction = "KO/WT")
-#> ko_vs_wt.csv: DESeq2-style table | lfc = 'log2FoldChange', padj = 'padj', gene = 'rownames_col' (symbol IDs) | 100 genes
+#> ko_vs_wt.csv: DESeq2-style table | lfc = 'log2FoldChange', padj = 'padj',
+#>   gene = 'rownames_col' (symbol IDs) | 100 genes
 #>   contrast (stated): KO/WT
 ```
 
@@ -141,12 +145,14 @@ y <- edgeR::normLibSizes(edgeR::DGEList(counts, group = samples$genotype))
 design <- model.matrix(~ samples$genotype)
 qlf <- edgeR::glmQLFTest(edgeR::glmQLFit(edgeR::estimateDisp(y, design), design), coef = 2)
 ko_edger <- readDE(qlf)
-#> qlf: edgeR DGELRT | lfc = 'logFC', padj = 'FDR', gene = row names (symbol IDs) | 100 genes
+#> qlf: edgeR DGELRT | lfc = 'logFC', padj = 'FDR', gene = row names (symbol
+#>   IDs) | 100 genes
 #>   contrast: samples$genotypeKO
 
 fit <- limma::eBayes(limma::lmFit(limma::voom(y, design), design))
 ko_limma <- readDE(fit, coef = 2, direction = "KO/WT")
-#> fit: limma fit | lfc = 'logFC', padj = 'adj.P.Val', gene = row names (symbol IDs) | 100 genes
+#> fit: limma fit | lfc = 'logFC', padj = 'adj.P.Val', gene = row names (symbol
+#>   IDs) | 100 genes
 #>   contrast: samples$genotypeKO  (stated: KO/WT)
 ```
 
@@ -572,7 +578,8 @@ Name the columns when detection fails:
 odd <- data.frame(symbol = c("geneA", "geneB"), effect = c(-2, 1.5),
                   q = c(1e-6, 1e-5))
 readDE(odd, gene = "symbol", lfc = "effect", padj = "q", direction = "KO/WT")
-#> odd: table | lfc = 'effect', padj = 'q', gene = 'symbol' (symbol IDs) | 2 genes
+#> odd: table | lfc = 'effect', padj = 'q', gene = 'symbol' (symbol IDs) | 2
+#>   genes
 #>   contrast (stated): KO/WT
 #>    gene  lfc  padj
 #> 1 geneA -2.0 1e-06
@@ -601,10 +608,10 @@ defineGroups(deTable(de, lfc = "ko_lfc", padj = "ko_padj"),
              targets = bound, conditionName = "age")[, c("gene", "group")]
 #>    gene              group
 #> 1 geneA activated_age_down
-#> 5 geneE activated_age_down
+#> 2 geneE activated_age_down
 #> 3 geneC   activated_age_up
 #> 4 geneD repressed_age_down
-#> 2 geneB   repressed_age_up
+#> 5 geneB   repressed_age_up
 ```
 
 ## 5. Expression for insets

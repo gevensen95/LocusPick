@@ -259,10 +259,19 @@ reportLoci <- function(loci, file, ..., candidates = NULL, tsv = NULL,
         res <- loci
         if (is.null(res$signal)) stop("No signal tracks in this result.", call. = FALSE)
         if (is.null(candidates)) candidates <- res$candidates
-        return(reportLoci(res$top, file, signal = res$signal, genes = res$genes,
-                          trackGroups = res$trackGroups, expression = res$expression,
-                          ..., candidates = candidates, tsv = tsv,
-                          width = width, height = height))
+        if (!is.null(candidates)) {
+            if (is.null(tsv)) tsv <- sub("\\.pdf$", "_candidates.tsv", file)
+            utils::write.table(candidates, tsv, sep = "\t", quote = FALSE, row.names = FALSE)
+        }
+        grDevices::pdf(file, width = width, height = height)
+        on.exit(grDevices::dev.off())
+        ok <- vapply(seq_len(nrow(res$top)), function(i) tryCatch({
+            print(plot(res, i, ...)); TRUE
+        }, error = function(e) {
+            message("Skipped ", res$top$gene[i], ": ", conditionMessage(e)); FALSE
+        }), logical(1))
+        message("Plotted ", sum(ok), "/", length(ok), " loci to ", file)
+        return(invisible(ok))
     }
     if (!is.null(candidates)) {
         if (is.null(tsv)) tsv <- sub("\\.pdf$", "_candidates.tsv", file)

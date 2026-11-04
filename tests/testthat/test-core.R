@@ -191,3 +191,94 @@ test_that("harmonizeSymbols works with a human OrgDb", {
     expect_equal(as.vector(x), c("HNF4A", "HNF4A", "KMT2A", "notAGene"))
     expect_equal(nrow(attr(x, "changes")), 2)
 })
+
+test_that("one contrast or none is supported", {
+    de <- read.delim(system.file("extdata", "toy_de.tsv", package = "LocusPick"))
+    ko  <- deTable(de, lfc = "ko_lfc", padj = "ko_padj")
+    age <- deTable(de, lfc = "cond_lfc", padj = "cond_padj")
+    gp <- defineGroups(ko)
+    expect_equal(levels(gp$group), c("activated", "repressed"))
+    expect_false("lfc_condition" %in% names(gp))
+    gc <- defineGroups(condition = age, conditionName = "age")
+    expect_equal(levels(gc$group), c("age_down", "age_up"))
+    expect_error(defineGroups(), "at least one contrast")
+
+    c1 <- buildCandidates(ex$peaks, ex$genes, gp, signal = ex$signal)
+    expect_true("abs_lfc_perturbation" %in% names(c1))
+    expect_false("abs_lfc_condition" %in% names(c1))
+    c0 <- buildCandidates(ex$peaks, ex$genes, groups = NULL, signal = ex$signal)
+    expect_equal(as.character(unique(c0$group)), "all")
+    expect_true("geneF" %in% c0$gene)      # no DE filter
+
+    f <- function(x) system.file("extdata", x, package = "LocusPick")
+    r1 <- suppressMessages(locusPick(f("toy_peaks.bed"), perturbation = ko, genes = f("toy.gtf"),
+                                     signal = list(young = f("toy_A.bw"), old = f("toy_B.bw"))))
+    expect_equal(names(r1$weights), c("young_mean", "abs_lfc_perturbation"))
+    expect_equal(r1$contrasts[["condition"]], "none")
+    r0 <- suppressMessages(locusPick(f("toy_peaks.bed"), genes = f("toy.gtf"),
+                                     signal = list(young = f("toy_A.bw"), old = f("toy_B.bw")),
+                                     weights = c(signal_change = 1)))
+    expect_equal(r0$top$gene[1], "geneA")   # largest young - old difference
+    expect_error(suppressMessages(locusPick(f("toy_peaks.bed"), genes = f("toy.gtf"))),
+                 "Nothing to rank")
+})
+
+test_that("peak-gene links replace distance assignment", {
+    links <- data.frame(peak = c("chr1-4800-5300", "chr1-27000-27400", "chr1-27000-27400"),
+                        gene = c("geneA", "geneA", "geneE"),
+                        score = c(0.6, 0.4, 0.2), pvalue = c(1e-5, 1e-3, 0.04))
+    cand <- buildCandidates(ex$peaks, ex$genes, groups = NULL, links = links,
+                            maxLinkDist = 25000)
+    expect_equal(nrow(cand), 3)
+    expect_true(all(c("link_score", "link_pvalue") %in% names(cand)))
+    far <- cand$gene == "geneA" & cand$peak_id == "chr1:27000-27400"
+    expect_equal(cand$distance[far], 14999)
+    expect_true(cand$near_gene[far])
+    strict <- buildCandidates(ex$peaks, ex$genes, groups = NULL, links = links,
+                              maxLinkDist = 10000)
+    expect_false(strict$near_gene[strict$gene == "geneE"])   # 20.4 kb away
+})
+
+test_that("rankLoci reports percentiles and signalShift tests specificity", {
+    cand <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal)
+    r <- rankLoci(cand, c(A_mean = 1, abs_lfc_perturbation = -1))
+    expect_true(all(c("pct_A_mean", "pct_abs_lfc_perturbation") %in% names(r)))
+    expect_true(all(r$pct_A_mean[r$eligible] > 0 & r$pct_A_mean[r$eligible] <= 1))
+    g <- r[r$group == "activated_condition_down" & r$eligible, ]
+    expect_equal(g$pct_A_mean[which.max(g$A_mean)], 1)
+    # a global shift: every background peak 2-fold lower in B
+    set.seed(1)
+    bg <- data.frame(A = rexp(200) + 1); bg$B <- bg$A / 2
+    d <- data.frame(group = "g", peak_id = paste0("p", 1:10), A = rexp(10) + 1)
+    d$B <- d$A / 2
+    s <- signalShift(d, "A", "B", background = bg)
+    expect_lt(s$p_vs_zero[1], 0.01)              # changed ...
+    expect_gt(s$p_vs_background[1], 0.05)        # ... but not more than everywhere
+    d$B <- d$A / 8
+    s2 <- signalShift(d, "A", "B", background = bg)
+    expect_lt(s2$p_vs_background[1], 0.01)       # specific
+    expect_equal(s2$shift_vs_background[1], 2, tolerance = 0.05)
+})
+
+test_that("weightStability and topOverlap measure stability", {
+    cand <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal)
+    w <- c(A_mean = 1, abs_lfc_perturbation = 1, abs_lfc_condition = 1)
+    ws <- weightStability(cand, w, n = 1, B = 30)
+    expect_true(all(ws$summary$mean_jaccard >= 0 & ws$summary$mean_jaccard <= 1))
+    expect_true(all(ws$loci$top_freq >= 0 & ws$loci$top_freq <= 1))
+    single <- ws$summary$mean_jaccard[ws$summary$group == "repressed_condition_up"]
+    expect_equal(single, 1)                       # one candidate: always on top
+    r1 <- rankLoci(cand, w); r2 <- rankLoci(cand, c(B_mean = 1))
+    ov <- topOverlap(list(full = r1, alt = r2), n = 2)
+    expect_true(all(ov$jaccard >= 0 & ov$jaccard <= 1))
+    expect_equal(unique(ov$ranking), "alt")
+})
+
+test_that("weightStability accepts per-group weight lists", {
+    ex <- locusPickExample()
+    cand <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal)
+    w <- stats::setNames(rep(list(c(A_mean = 1, abs_lfc_perturbation = 1)), length(unique(cand$group))),
+                         unique(as.character(cand$group)))
+    ws <- weightStability(cand, w, n = 1, B = 10)
+    expect_true(all(ws$summary$mean_jaccard >= 0 & ws$summary$mean_jaccard <= 1))
+})
