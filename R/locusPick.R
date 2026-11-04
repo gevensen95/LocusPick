@@ -32,6 +32,9 @@
 #' @param maxDist,maxLinkDist,minMappability,minCoverage,geneCol,assignMode
 #'   Passed to [buildCandidates()].
 #' @param minReps,blacklist Passed to [readPeaks()].
+#' @param replicates,minReproducible Optional replicate tracks per condition,
+#'   to require that the signal change at a pick reproduces across replicates;
+#'   see [buildCandidates()].
 #' @param n Number of top loci per group.
 #' @return An object of class `LocusPickResult`: a list with `candidates`
 #'   (ranked, all flags), `top`, `qc`, `shift`, `checks`, `groups`, and the
@@ -61,7 +64,7 @@ locusPick <- function(peaks, perturbation = NULL, condition = NULL, genes, signa
                       maxLinkDist = 5e5,
                       minMappability = 0.8, minCoverage = 0.5, geneCol = NULL,
                       assignMode = c("nearest", "all"), minReps = NULL,
-                      blacklist = NULL, n = 10) {
+                      blacklist = NULL, replicates = NULL, minReproducible = 1, n = 10) {
     perturbationType <- match.arg(perturbationType)
     assignMode <- match.arg(assignMode)
     harm <- if (!is.null(orgDb)) function(s) harmonizeSymbols(s, orgDb) else NULL
@@ -101,7 +104,8 @@ locusPick <- function(peaks, perturbation = NULL, condition = NULL, genes, signa
                             geneCol = geneCol, links = links, maxDist = maxDist,
                             maxLinkDist = maxLinkDist,
                             minMappability = minMappability, minCoverage = minCoverage,
-                            assignMode = assignMode)
+                            assignMode = assignMode, replicates = replicates,
+                            minReproducible = minReproducible)
     tr <- names(signal)
     if (length(tr) >= 2)
         cand$signal_change <- cand[[paste0(tr[1], "_mean")]] - cand[[paste0(tr[2], "_mean")]]

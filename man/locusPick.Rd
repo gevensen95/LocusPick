@@ -30,6 +30,8 @@ locusPick(
   assignMode = c("nearest", "all"),
   minReps = NULL,
   blacklist = NULL,
+  replicates = NULL,
+  minReproducible = 1,
   n = 10
 )
 }
@@ -74,6 +76,10 @@ instead of distance-based assignment; see \code{\link[=buildCandidates]{buildCan
 \item{maxDist, maxLinkDist, minMappability, minCoverage, geneCol, assignMode}{Passed to \code{\link[=buildCandidates]{buildCandidates()}}.}
 
 \item{minReps, blacklist}{Passed to \code{\link[=readPeaks]{readPeaks()}}.}
+
+\item{replicates, minReproducible}{Optional replicate tracks per condition,
+to require that the signal change at a pick reproduces across replicates;
+see \code{\link[=buildCandidates]{buildCandidates()}}.}
 
 \item{n}{Number of top loci per group.}
 }

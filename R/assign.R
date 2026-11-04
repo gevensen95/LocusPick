@@ -103,15 +103,19 @@ checkAssignment <- function(peaks, genes, geneCol = "gene", maxDist = 5000) {
 # Distance from each region to the body of its assigned gene on the same
 # chromosome (NA if that gene is not on the chromosome). Vectorized.
 .distToGene <- function(gr, gene, gm) {
+    # Distance to the nearest copy of the gene on the same chromosome: gene
+    # names can repeat (PAR genes, paralogs sharing a symbol, readthroughs).
     g <- .matchSeqStyle(gm$genes, gr)
     gkey <- paste(g$gene_name, GenomicRanges::seqnames(g), sep = "\r")
     key <- paste(gene, GenomicRanges::seqnames(gr), sep = "\r")
-    j <- match(key, gkey)
     d <- rep(NA_real_, length(gr))
-    ok <- !is.na(j)
-    if (any(ok)) {
-        d[ok] <- GenomicRanges::distance(gr[ok], g[j[ok]], ignore.strand = TRUE)
-        d[ok & is.na(d)] <- 0
+    m <- S4Vectors::findMatches(key, gkey)
+    if (length(m)) {
+        q <- S4Vectors::queryHits(m); s <- S4Vectors::subjectHits(m)
+        dd <- GenomicRanges::distance(gr[q], g[s], ignore.strand = TRUE)
+        dd[is.na(dd)] <- 0
+        best <- tapply(dd, q, min)
+        d[as.integer(names(best))] <- as.numeric(best)
     }
     d
 }

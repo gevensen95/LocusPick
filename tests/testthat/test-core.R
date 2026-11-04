@@ -282,3 +282,33 @@ test_that("weightStability accepts per-group weight lists", {
     ws <- weightStability(cand, w, n = 1, B = 10)
     expect_true(all(ws$summary$mean_jaccard >= 0 & ws$summary$mean_jaccard <= 1))
 })
+
+test_that("replicate agreement flags changes that flip between replicates", {
+    ex <- locusPickExample()
+    a <- system.file("extdata", "toy_A.bw", package = "LocusPick")
+    b <- system.file("extdata", "toy_B.bw", package = "LocusPick")
+    # consistent: A reps vs B reps
+    c1 <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal,
+                          replicates = list(A = c(a, a), B = c(b, b)))
+    expect_true(all(c("rep_diff", "rep_agreement", "reproducible") %in% names(c1)))
+    ok <- !is.na(c1$rep_diff) & c1$rep_diff != 0
+    expect_true(any(ok))
+    expect_true(all(c1$rep_agreement[ok] == 1))
+    # inconsistent: one replicate pair reversed
+    c2 <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal,
+                          replicates = list(A = c(a, b), B = c(b, a)))
+    expect_true(all(c2$rep_agreement <= 0.5 | c2$rep_diff == 0, na.rm = TRUE))
+    expect_false(any(is.na(c1$rep_agreement) & c1$reproducible))
+    expect_false(any(c2$eligible & !c2$reproducible))
+    expect_true("fail_reproducible" %in% names(qcSummary(c2)))
+    expect_error(buildCandidates(ex$peaks, ex$genes, signal = ex$signal, replicates = list(a, b)),
+                 "two named")
+})
+
+test_that("gene distance uses the nearest copy of a repeated gene name", {
+    g <- GenomicRanges::GRanges(c("chr1:1000-2000", "chr1:50000-60000"), strand = "+")
+    g$gene_name <- c("DUP", "DUP")
+    gm <- list(genes = g)
+    p <- GenomicRanges::GRanges("chr1:52000-52100")
+    expect_equal(LocusPick:::.distToGene(p, "DUP", gm), 0)
+})

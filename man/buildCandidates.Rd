@@ -17,7 +17,9 @@ buildCandidates(
   minMappability = 0.8,
   minCoverage = 0.5,
   requireSignal = names(signal),
-  assignMode = c("nearest", "all")
+  assignMode = c("nearest", "all"),
+  replicates = NULL,
+  minReproducible = 1
 )
 }
 \arguments{
@@ -64,12 +66,29 @@ assignments; \code{link_score} and \code{link_pvalue} can be used in ranking.}
 another gene's promoter peak as an example; \code{"all"} links it to every
 gene within \code{maxDist}. \code{n_nearby_genes} records how many genes were in
 range, so crowded loci can be spotted either way.}
+
+\item{replicates}{Optional replicate tracks for a two-condition
+comparison: a list of two elements named by condition (e.g.
+\code{list(young = c("y1.bw", "y2.bw"), old = c("o1.bw", "o2.bw"))}), each a
+vector or list of signal sources, one per replicate. For every peak, the
+change between conditions is computed for each pair of replicates (first
+condition minus second) and compared with the sign of the change between
+replicate means. \code{rep_diff} is that mean change and \code{rep_agreement} the
+fraction of replicate pairs agreeing with its sign. A peak is
+\code{reproducible} when \code{rep_agreement >= minReproducible}, and only
+reproducible peaks are eligible. Use it when the example is meant to show
+a change in signal: a locus whose change flips between replicates does not
+illustrate one.}
+
+\item{minReproducible}{Minimum \code{rep_agreement} (default 1: every replicate
+pair agrees).}
 }
 \value{
 A \code{data.frame} with peak coordinates, \code{gene}, group columns, signal
 columns (\verb{<track>_mean}, \verb{<track>_cov}), \code{mappability}, absolute fold
 changes, and the flags \code{gene_in_models}, \code{near_gene}, \code{mappable},
-\code{has_signal} and \code{eligible}.
+\code{has_signal} and \code{eligible}; with \code{replicates}, also \code{rep_diff},
+\code{rep_agreement} and \code{reproducible}.
 }
 \description{
 Joins peaks, gene groups, signal and mappability into one row per
