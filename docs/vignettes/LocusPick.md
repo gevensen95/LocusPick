@@ -11,7 +11,9 @@ Choosing representative loci with LocusPick
     control](#3-candidates-and-quality-control)
   - [4. Ranking](#4-ranking)
   - [5. Is the change specific?](#5-is-the-change-specific)
+  - [Typicality and stability](#typicality-and-stability)
   - [6. Plots](#6-plots)
+- [One contrast, or none](#one-contrast-or-none)
 - [Using your own data](#using-your-own-data)
   - [Signal](#signal)
   - [Mappability](#mappability)
@@ -63,9 +65,11 @@ res <- locusPick(
     mappability  = f("toy_map.bw"))
 #> == Reading inputs
 #> toy_peaks.bed: bed, 8 peaks
-#> x: DESeq2-style table | lfc = 'log2FoldChange', padj = 'padj', gene = 'gene' (symbol IDs) | 6 genes
+#> x: DESeq2-style table | lfc = 'log2FoldChange', padj = 'padj', gene = 'gene'
+#>   (symbol IDs) | 6 genes
 #>   contrast (stated): KO/WT
-#> x: edgeR-style table | lfc = 'logFC', padj = 'FDR', gene = 'gene' (symbol IDs) | 6 genes
+#> x: edgeR-style table | lfc = 'logFC', padj = 'FDR', gene = 'gene' (symbol
+#>   IDs) | 6 genes
 #>   contrast (stated): old/young
 #> == Checking inputs
 #> [ok  ] chromosome naming: peaks / genes      UCSC / UCSC
@@ -76,12 +80,14 @@ res <- locusPick(
 #> [ok  ] grouped genes found in gene models    100%
 #>         Peaks without signal: check build/naming of the track, or gaps in its coverage.
 #> == Building candidates
-#>   ranking weights: CNR_young_mean = 1, abs_lfc_perturbation = 1, abs_lfc_condition = 1
+#> ranking weights: CNR_young_mean = 1, abs_lfc_perturbation = 1,
+#>     abs_lfc_condition = 1
 res
 #> LocusPick result
-#>   contrasts: perturbation = KO/WT | condition = old/young 
+#>   perturbation: KO/WT 
+#>   condition:    old/young 
 #>   peaks: 8 | candidate peak-gene pairs: 6 | eligible: 4 
-#>   weights: CNR_young_mean=1, abs_lfc_perturbation=1, abs_lfc_condition=1 
+#> weights: CNR_young_mean=1, abs_lfc_perturbation=1, abs_lfc_condition=1
 #> 
 #>                     group peaks genes fail_gene_in_models fail_near_gene
 #>  activated_condition_down     2     2                   0              0
@@ -95,12 +101,18 @@ res
 #>              0               0        1              1
 #> 
 #> Signal change (first vs second track):
-#>                     group n frac_a_gt_b median_log2_a_over_b
-#>  activated_condition_down 2       1.000                0.958
-#>    activated_condition_up 1       1.000                0.233
-#>  repressed_condition_down 1       1.000                0.536
-#>    repressed_condition_up 1       1.000                0.622
-#>    background (all peaks) 7       0.857                0.536
+#>                     group n frac_a_gt_b median_log2_a_over_b p_vs_zero
+#>  activated_condition_down 2       1.000                0.958        NA
+#>    activated_condition_up 1       1.000                0.233        NA
+#>  repressed_condition_down 1       1.000                0.536        NA
+#>    repressed_condition_up 1       1.000                0.622        NA
+#>    background (all peaks) 7       0.857                0.536    0.0469
+#>  shift_vs_background p_vs_background
+#>               0.4221              NA
+#>              -0.3030              NA
+#>               0.0000              NA
+#>               0.0861              NA
+#>                   NA              NA
 #> 
 #> Top loci:
 #>                     group  gene          peak_id   feature score
@@ -116,7 +128,7 @@ res
 plot(res, "geneA")
 ```
 
-![](LocusPick_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
+![](LocusPick_files/figure-gfm/quick-start-plot-1.png)<!-- -->
 
 `reportLoci(res, "review.pdf")` writes every top locus to a PDF and the
 full candidate table to a TSV. With real data you would pass
@@ -175,16 +187,16 @@ groups <- defineGroups(ko, age, alpha = 0.05, perturbationType = "loss",
 groups
 #>    gene regulation condition_dir                    group lfc_perturbation
 #> 1 geneA  activated          down activated_condition_down             -2.0
-#> 5 geneE  activated          down activated_condition_down             -1.2
+#> 2 geneE  activated          down activated_condition_down             -1.2
 #> 3 geneC  activated            up   activated_condition_up             -1.0
 #> 4 geneD  repressed          down repressed_condition_down              1.0
-#> 2 geneB  repressed            up   repressed_condition_up              1.5
+#> 5 geneB  repressed            up   repressed_condition_up              1.5
 #>   padj_perturbation lfc_condition padj_condition
 #> 1             1e-06          -1.0          1e-04
-#> 5             1e-04          -0.7          1e-03
+#> 2             1e-04          -0.7          1e-03
 #> 3             1e-03           0.8          1e-02
 #> 4             1e-04          -0.9          1e-03
-#> 2             1e-05           1.2          1e-03
+#> 5             1e-05           1.2          1e-03
 ```
 
 With `perturbationType = "loss"`, genes that go down in the knockout are
@@ -277,18 +289,50 @@ seen at all peaks:
 ``` r
 signalShift(cand, "A_mean", "B_mean",
             background = signalAtPeaks(ex$peaks, ex$signal))
-#>                      group n frac_a_gt_b median_log2_a_over_b
-#> 1 activated_condition_down 2   1.0000000            0.9578369
-#> 2   activated_condition_up 1   1.0000000            0.2326687
-#> 3 repressed_condition_down 1   1.0000000            0.5357144
-#> 4   repressed_condition_up 1   1.0000000            0.6217747
-#> 5   background (all peaks) 7   0.8571429            0.5357144
+#>                      group n frac_a_gt_b median_log2_a_over_b p_vs_zero
+#> 1 activated_condition_down 2   1.0000000            0.9578369        NA
+#> 2   activated_condition_up 1   1.0000000            0.2326687        NA
+#> 3 repressed_condition_down 1   1.0000000            0.5357144        NA
+#> 4   repressed_condition_up 1   1.0000000            0.6217747        NA
+#> 5   background (all peaks) 7   0.8571429            0.5357144  0.046875
+#>   shift_vs_background p_vs_background
+#> 1           0.4221225              NA
+#> 2          -0.3030457              NA
+#> 3           0.0000000              NA
+#> 4           0.0860603              NA
+#> 5                  NA              NA
 ```
 
-If every group and the background show a similar shift, a track showing
-reduced binding at the example is consistent with the hypothesis but not
-specific to it. That difference should be reflected in the figure
-legend.
+`p_vs_zero` tests whether a group’s change differs from 0 and
+`p_vs_background` whether it differs from all peaks. If a group’s shift
+is significant against zero but not against the background, a track
+showing reduced binding at the example is consistent with the hypothesis
+but not specific to it. That difference should be reflected in the
+figure legend.
+
+### Typicality and stability
+
+Each weighted column also gets a percentile within its group
+(`pct_<column>`), so you can report how typical a pick is, and
+`weightStability()` shows how much the top loci depend on the exact
+weights:
+
+``` r
+ranked[ranked$rank %in% 1, c("group", "gene", "pct_A_mean", "pct_abs_lfc_perturbation")]
+#>                      group  gene pct_A_mean pct_abs_lfc_perturbation
+#> 1 activated_condition_down geneA          1                        1
+#> 3   activated_condition_up geneC          1                        1
+#> 6   repressed_condition_up geneB          1                        1
+weightStability(cand, c(A_mean = 1, loss = 1, abs_lfc_perturbation = 1,
+                        abs_lfc_condition = 1), n = 1, B = 100)$summary
+#>                      group mean_jaccard
+#> 1 activated_condition_down            1
+#> 2   activated_condition_up            1
+#> 3   repressed_condition_up            1
+```
+
+`topOverlap()` compares rankings built from different inputs, for
+example leaving out one replicate at a time.
 
 ### 6. Plots
 
@@ -299,7 +343,7 @@ plotLocus(top[1, ], ex$signal, ex$genes,
           expression = ex$expression)
 ```
 
-![](LocusPick_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+![](LocusPick_files/figure-gfm/locus-plot-1.png)<!-- -->
 
 Tracks in one `trackGroups` panel share a y-axis, so conditions are
 directly comparable; different panels (for example CUT&RUN and ATAC) get
@@ -314,6 +358,71 @@ reportLoci(top, "candidates.pdf", signal = ex$signal, genes = ex$genes,
            trackGroups = list(Binding = c("A", "B")),
            expression = ex$expression, candidates = ranked)
 ```
+
+## One contrast, or none
+
+Not every study has a perturbation *and* a condition. With one contrast,
+groups follow its direction; with none, all genes linked to a peak form
+one group and loci are ranked on signal alone:
+
+``` r
+de <- read.delim(system.file("extdata", "toy_de.tsv", package = "LocusPick"))
+ko <- deTable(de, lfc = "ko_lfc", padj = "ko_padj")
+
+defineGroups(ko)[, c("gene", "group")]                  # activated / repressed
+#>    gene     group
+#> 1 geneA activated
+#> 2 geneC activated
+#> 3 geneE activated
+#> 4 geneB repressed
+#> 5 geneD repressed
+
+only_ko <- locusPick(f("toy_peaks.bed"), perturbation = ko, genes = f("toy.gtf"),
+                     signal = list(young = f("toy_A.bw"), old = f("toy_B.bw")))
+#> == Reading inputs
+#> toy_peaks.bed: bed, 8 peaks
+#> == Checking inputs
+#> [ok  ] chromosome naming: peaks / genes      UCSC / UCSC
+#> [ok  ] peak chromosomes found in gene models 100%
+#> [ok  ] peaks within 5,000 bp of a gene       100%
+#> [warn] signal 'young': peaks with data       88%
+#> [warn] signal 'old': peaks with data         88%
+#> [ok  ] grouped genes found in gene models    100%
+#>         Peaks without signal: check build/naming of the track, or gaps in its coverage.
+#> == Building candidates
+#> ranking weights: young_mean = 1, abs_lfc_perturbation = 1
+only_ko$top[, c("group", "gene", "score")]
+#>       group  gene     score
+#> 1 activated geneA 1.0000000
+#> 2 activated geneE 0.6666667
+#> 3 activated geneC 0.3333333
+#> 4 repressed geneB 0.7500000
+#> 5 repressed geneD 0.7500000
+
+no_de <- locusPick(f("toy_peaks.bed"), genes = f("toy.gtf"),
+                   signal = list(young = f("toy_A.bw"), old = f("toy_B.bw")),
+                   weights = c(signal_change = 1))      # largest loss young -> old
+#> == Reading inputs
+#> toy_peaks.bed: bed, 8 peaks
+#>   No DE results given: all linked genes form one group, ranked on signal.
+#> == Checking inputs
+#> [ok  ] chromosome naming: peaks / genes      UCSC / UCSC
+#> [ok  ] peak chromosomes found in gene models 100%
+#> [ok  ] peaks within 5,000 bp of a gene       100%
+#> [warn] signal 'young': peaks with data       88%
+#> [warn] signal 'old': peaks with data         88%
+#>         Peaks without signal: check build/naming of the track, or gaps in its coverage.
+#> == Building candidates
+#> ranking weights: signal_change = 1
+no_de$top[1:3, c("gene", "peak_id", "signal_change")]
+#>    gene          peak_id signal_change
+#> 1 geneA   chr1:4800-5300     0.3473658
+#> 2 geneE chr1:47800-48200     0.2008030
+#> 3 geneB chr1:19800-20300     0.1755968
+```
+
+For single-cell data, see
+`vignette("single-cell", package = "LocusPick")`.
 
 ## Using your own data
 
@@ -401,7 +510,7 @@ reportLoci(res, "review.pdf")
 
 A sentence like the following lets readers reproduce the choice:
 
-> Representative loci were selected with LocusPick (v0.2.0). Peaks were
+> Representative loci were selected with LocusPick (v0.4.0). Peaks were
 > assigned to the nearest gene within 5 kb; loci with mean Umap k50
 > mappability \< 0.8, \< 50% signal coverage, or an assignment
 > inconsistent with the gene models were excluded. Remaining loci were
@@ -430,7 +539,7 @@ sessionInfo()
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#> [1] LocusPick_0.2.0
+#> [1] LocusPick_0.4.0
 #> 
 #> loaded via a namespace (and not attached):
 #>  [1] utf8_1.2.4                  generics_0.1.3             

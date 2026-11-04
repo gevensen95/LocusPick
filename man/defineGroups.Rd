@@ -2,11 +2,11 @@
 % Please edit documentation in R/groups.R
 \name{defineGroups}
 \alias{defineGroups}
-\title{Define gene groups from a perturbation and a condition contrast}
+\title{Define gene groups from one or two contrasts}
 \usage{
 defineGroups(
-  perturbation,
-  condition,
+  perturbation = NULL,
+  condition = NULL,
   targets = NULL,
   alpha = 0.05,
   minLFC = 0,
@@ -17,15 +17,15 @@ defineGroups(
 \arguments{
 \item{perturbation, condition}{DE results: tables from \code{\link[=deTable]{deTable()}} or
 \code{\link[=readDE]{readDE()}}, or anything \code{readDE()} accepts (a DESeq2/edgeR/limma object
-or a results file), which is then read with default settings.}
+or a results file). Either may be \code{NULL}, but not both.}
 
 \item{targets}{Optional character vector restricting groups to these genes
 (for example genes with a binding peak).}
 
-\item{alpha}{Adjusted p-value cut-off, applied to both contrasts.}
+\item{alpha}{Adjusted p-value cut-off, applied to each contrast given.}
 
-\item{minLFC}{Minimum absolute log2 fold change, applied to both contrasts.
-A length-2 vector sets perturbation and condition separately.}
+\item{minLFC}{Minimum absolute log2 fold change. A length-2 vector sets
+perturbation and condition separately.}
 
 \item{perturbationType}{\code{"loss"} (knockout/knockdown) or \code{"gain"}
 (overexpression).}
@@ -33,15 +33,27 @@ A length-2 vector sets perturbation and condition separately.}
 \item{conditionName}{Label for the condition used in group names.}
 }
 \value{
-A \code{data.frame} with \code{gene}, \code{regulation}, \code{condition_dir}, \code{group},
-and the fold changes and p-values of both contrasts.
+A \code{data.frame} with \code{gene}, \code{group} (a factor), and the direction,
+fold change and adjusted p-value columns of each contrast given
+(\code{regulation}, \code{lfc_perturbation}, \code{padj_perturbation}; \code{condition_dir},
+\code{lfc_condition}, \code{padj_condition}).
 }
 \description{
-Places genes into the four combinations of \emph{regulation by the factor}
-(from a perturbation such as a knockout) and \emph{direction in a condition}
-(such as aging or treatment). For a loss-of-function perturbation, genes
-that go down when the factor is removed are \code{activated} by the factor and
-genes that go up are \code{repressed}.
+With two contrasts, places genes into the four combinations of
+\emph{regulation by the factor} (from a perturbation such as a knockout) and
+\emph{direction in a condition} (such as aging or treatment). For a
+loss-of-function perturbation, genes that go down when the factor is
+removed are \code{activated} by the factor and genes that go up are \code{repressed}.
+}
+\details{
+Either contrast can be omitted:
+\itemize{
+\item perturbation only: groups \code{activated} and \code{repressed};
+\item condition only: groups \verb{<conditionName>_up} and \verb{<conditionName>_down}.
+}
+
+To pick loci without any expression data, skip this function and call
+\code{\link[=buildCandidates]{buildCandidates()}} with \code{groups = NULL}.
 }
 \examples{
 ko  <- deTable(data.frame(gene = c("a", "b", "c"), lfc = c(-2, 1.5, -1),
@@ -49,4 +61,6 @@ ko  <- deTable(data.frame(gene = c("a", "b", "c"), lfc = c(-2, 1.5, -1),
 age <- deTable(data.frame(gene = c("a", "b", "c"), lfc = c(-1, 1, 2),
                           padj = c(1e-3, 1e-4, 1e-6)), lfc = "lfc")
 defineGroups(ko, age, conditionName = "age")
+defineGroups(ko)                                   # perturbation only
+defineGroups(condition = age, conditionName = "age")  # condition only
 }

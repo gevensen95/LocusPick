@@ -41,6 +41,8 @@ Converts expression objects into the long table used by \code{\link[=plotLocus]{
 \item \code{DGEList}: counts per million.
 \item \code{SummarizedExperiment}: the first assay, or the one named by \code{assay}.
 \item matrix or \code{data.frame} of genes × samples: used as is.
+\item \code{\link[=pseudobulk]{pseudobulk()}} result: counts per million, one panel per cell type
+(\code{panel} is then used as a suffix, e.g. \code{"Hepatocyte expression"}).
 }
 }
 \examples{

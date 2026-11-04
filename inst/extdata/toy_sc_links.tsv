@@ -1,0 +1,6 @@
+peak	gene	score	pvalue
+chr1-4800-5300	geneA	0.62	1e-08
+chr1-19800-20300	geneB	0.48	1e-06
+chr1-27000-27400	geneC	0.35	1e-04
+chr1-47800-48200	geneE	0.3	0.001
+chr1-27000-27400	geneA	0.12	0.03

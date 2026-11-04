@@ -28,59 +28,94 @@ deTable <- function(df, gene = "gene", lfc = "log2FoldChange", padj = "padj") {
     out
 }
 
-#' Define gene groups from a perturbation and a condition contrast
+#' Define gene groups from one or two contrasts
 #'
-#' Places genes into the four combinations of *regulation by the factor*
-#' (from a perturbation such as a knockout) and *direction in a condition*
-#' (such as aging or treatment). For a loss-of-function perturbation, genes
-#' that go down when the factor is removed are `activated` by the factor and
-#' genes that go up are `repressed`.
+#' With two contrasts, places genes into the four combinations of
+#' *regulation by the factor* (from a perturbation such as a knockout) and
+#' *direction in a condition* (such as aging or treatment). For a
+#' loss-of-function perturbation, genes that go down when the factor is
+#' removed are `activated` by the factor and genes that go up are `repressed`.
+#'
+#' Either contrast can be omitted:
+#' * perturbation only: groups `activated` and `repressed`;
+#' * condition only: groups `<conditionName>_up` and `<conditionName>_down`.
+#'
+#' To pick loci without any expression data, skip this function and call
+#' [buildCandidates()] with `groups = NULL`.
 #'
 #' @param perturbation,condition DE results: tables from [deTable()] or
 #'   [readDE()], or anything `readDE()` accepts (a DESeq2/edgeR/limma object
-#'   or a results file), which is then read with default settings.
+#'   or a results file). Either may be `NULL`, but not both.
 #' @param targets Optional character vector restricting groups to these genes
 #'   (for example genes with a binding peak).
-#' @param alpha Adjusted p-value cut-off, applied to both contrasts.
-#' @param minLFC Minimum absolute log2 fold change, applied to both contrasts.
-#'   A length-2 vector sets perturbation and condition separately.
+#' @param alpha Adjusted p-value cut-off, applied to each contrast given.
+#' @param minLFC Minimum absolute log2 fold change. A length-2 vector sets
+#'   perturbation and condition separately.
 #' @param perturbationType `"loss"` (knockout/knockdown) or `"gain"`
 #'   (overexpression).
 #' @param conditionName Label for the condition used in group names.
-#' @return A `data.frame` with `gene`, `regulation`, `condition_dir`, `group`,
-#'   and the fold changes and p-values of both contrasts.
+#' @return A `data.frame` with `gene`, `group` (a factor), and the direction,
+#'   fold change and adjusted p-value columns of each contrast given
+#'   (`regulation`, `lfc_perturbation`, `padj_perturbation`; `condition_dir`,
+#'   `lfc_condition`, `padj_condition`).
 #' @examples
 #' ko  <- deTable(data.frame(gene = c("a", "b", "c"), lfc = c(-2, 1.5, -1),
 #'                           padj = c(1e-5, 1e-3, 0.5)), lfc = "lfc")
 #' age <- deTable(data.frame(gene = c("a", "b", "c"), lfc = c(-1, 1, 2),
 #'                           padj = c(1e-3, 1e-4, 1e-6)), lfc = "lfc")
 #' defineGroups(ko, age, conditionName = "age")
+#' defineGroups(ko)                                   # perturbation only
+#' defineGroups(condition = age, conditionName = "age")  # condition only
 #' @export
-defineGroups <- function(perturbation, condition, targets = NULL, alpha = 0.05,
-                         minLFC = 0, perturbationType = c("loss", "gain"),
+defineGroups <- function(perturbation = NULL, condition = NULL, targets = NULL,
+                         alpha = 0.05, minLFC = 0, perturbationType = c("loss", "gain"),
                          conditionName = "condition") {
     perturbationType <- match.arg(perturbationType)
-    perturbation <- .asDE(perturbation)
-    condition <- .asDE(condition)
+    if (is.null(perturbation) && is.null(condition))
+        stop("Give at least one contrast. To rank loci without expression data, ",
+             "use buildCandidates(groups = NULL).", call. = FALSE)
     minLFC <- rep_len(minLFC, 2)
+    sig <- function(d, m) d[d$padj <= alpha & abs(d$lfc) > m, , drop = FALSE]
 
-    sigP <- perturbation[perturbation$padj <= alpha & abs(perturbation$lfc) > minLFC[1], ]
-    sigC <- condition[condition$padj <= alpha & abs(condition$lfc) > minLFC[2], ]
-    if (!is.null(targets)) sigP <- sigP[sigP$gene %in% targets, ]
-    m <- merge(sigP, sigC, by = "gene", suffixes = c("_perturbation", "_condition"))
-    if (!nrow(m)) {
-        warning("No genes are significant in both contrasts.", call. = FALSE)
+    if (!is.null(perturbation)) {
+        sigP <- sig(.asDE(perturbation), minLFC[1])
+        if (!is.null(targets)) sigP <- sigP[sigP$gene %in% targets, ]
+        names(sigP)[2:3] <- c("lfc_perturbation", "padj_perturbation")
+        actSign <- if (perturbationType == "loss") -1 else 1
+        sigP$regulation <- ifelse(sign(sigP$lfc_perturbation) == actSign,
+                                  "activated", "repressed")
     }
-    actSign <- if (perturbationType == "loss") -1 else 1
-    m$regulation <- ifelse(sign(m$lfc_perturbation) == actSign, "activated", "repressed")
-    m$condition_dir <- ifelse(m$lfc_condition > 0, "up", "down")
-    m$group <- paste(m$regulation, conditionName, m$condition_dir, sep = "_")
-    lev <- paste(rep(c("activated", "repressed"), each = 2), conditionName,
-                 c("down", "up"), sep = "_")
+    if (!is.null(condition)) {
+        sigC <- sig(.asDE(condition), minLFC[2])
+        if (!is.null(targets) && is.null(perturbation)) sigC <- sigC[sigC$gene %in% targets, ]
+        names(sigC)[2:3] <- c("lfc_condition", "padj_condition")
+        sigC$condition_dir <- ifelse(sigC$lfc_condition > 0, "up", "down")
+    }
+
+    if (!is.null(perturbation) && !is.null(condition)) {
+        m <- merge(sigP, sigC, by = "gene")
+        if (!nrow(m)) warning("No genes are significant in both contrasts.", call. = FALSE)
+        m$group <- if (nrow(m)) paste(m$regulation, conditionName, m$condition_dir, sep = "_") else character()
+        lev <- paste(rep(c("activated", "repressed"), each = 2), conditionName,
+                     c("down", "up"), sep = "_")
+        cols <- c("gene", "regulation", "condition_dir", "group", "lfc_perturbation",
+                  "padj_perturbation", "lfc_condition", "padj_condition")
+    } else if (!is.null(perturbation)) {
+        m <- sigP
+        m$group <- m$regulation
+        lev <- c("activated", "repressed")
+        cols <- c("gene", "regulation", "group", "lfc_perturbation", "padj_perturbation")
+    } else {
+        m <- sigC
+        m$group <- if (nrow(m)) paste(conditionName, m$condition_dir, sep = "_") else character()
+        lev <- paste(conditionName, c("down", "up"), sep = "_")
+        cols <- c("gene", "condition_dir", "group", "lfc_condition", "padj_condition")
+    }
+    if (!nrow(m)) warning("No significant genes.", call. = FALSE)
     m$group <- factor(m$group, levels = lev)
-    m[order(m$group, m$gene),
-      c("gene", "regulation", "condition_dir", "group", "lfc_perturbation",
-        "padj_perturbation", "lfc_condition", "padj_condition")]
+    m <- m[order(m$group, m$gene), cols]
+    rownames(m) <- NULL
+    m
 }
 
 .asDE <- function(x) {

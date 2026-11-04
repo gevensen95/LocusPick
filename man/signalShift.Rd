@@ -19,17 +19,27 @@ peaks, e.g. from \code{\link[=signalAtPeaks]{signalAtPeaks()}} on the full peak 
 \item{pseudocount}{Added before taking log2 ratios.}
 }
 \value{
-\code{data.frame} with, per group: \code{n}, \code{frac_a_gt_b}, and
-\code{median_log2_a_over_b}.
+\code{data.frame} with, per group: \code{n}, \code{frac_a_gt_b},
+\code{median_log2_a_over_b}, \code{p_vs_zero}, and with a background
+\code{shift_vs_background} (difference of medians) and \code{p_vs_background}.
 }
 \description{
 A locus showing reduced binding in one condition is only informative if
-the reduction is not genome-wide. This compares the change between two
-signal columns within each group and, optionally, across a background set of
-peaks.
+the reduction is not genome-wide. For each group, this summarizes the
+per-peak log2 ratio of two signal columns, tests it against zero, and,
+with a background set of peaks, tests whether it differs from the
+background.
+}
+\details{
+Tests are two-sided Wilcoxon tests: signed-rank against zero
+(\code{p_vs_zero}) and rank-sum against the background ratios
+(\code{p_vs_background}). Groups with fewer than 3 peaks get \code{NA}. A group whose
+shift is significant against zero but not against the background shows a
+genome-wide change, not a group-specific one.
 }
 \examples{
 ex <- locusPickExample()
 cand <- buildCandidates(ex$peaks, ex$genes, ex$groups, signal = ex$signal)
-signalShift(cand, "A_mean", "B_mean")
+signalShift(cand, "A_mean", "B_mean",
+            background = signalAtPeaks(ex$peaks, ex$signal))
 }

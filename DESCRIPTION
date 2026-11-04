@@ -1,7 +1,7 @@
 Package: LocusPick
 Type: Package
 Title: Transparent Selection of Representative Loci for Genome Browser Figures
-Version: 0.2.0
+Version: 0.4.1
 Authors@R: c(
     person("Garrett", "Evensen", email = "kgsevensen@gmail.com",
            role = c("aut", "cre")),
@@ -31,6 +31,7 @@ Imports:
     S4Vectors,
     GenomeInfoDb,
     rtracklayer,
+    Matrix,
     ggplot2,
     patchwork,
     methods,
@@ -45,6 +46,10 @@ Suggests:
     SummarizedExperiment,
     Rsamtools,
     GenomicAlignments,
+    SeuratObject,
+    Signac,
+    SingleCellExperiment,
+    DropletUtils,
     org.Mm.eg.db,
     org.Hs.eg.db,
     testthat (>= 3.0.0),
@@ -52,7 +57,7 @@ Suggests:
     rmarkdown
 VignetteBuilder: knitr
 biocViews: Software, Visualization, ChIPSeq, ATACSeq, Coverage,
-    DifferentialExpression, GeneExpression, Annotation
+    DifferentialExpression, GeneExpression, Annotation, SingleCell
 Roxygen: list(markdown = TRUE)
 Config/testthat/edition: 3
-Config/roxygen2/version: 8.1.0
+Config/roxygen2/version: 8.1.1

@@ -57,7 +57,8 @@ naming mismatches that otherwise fail silently.
 | `DESeqDataSet`, `DGEList` | `expressionFrom()` | normalized counts / CPM for insets |
 
 `locusPick()` calls these for you, so a full run can be one call (see
-`vignette("LocusPick")`). Every reader prints what it detected, so you can
+`vignette("LocusPick")`). For single-cell data (Seurat/Signac,
+`SingleCellExperiment`, Cell Ranger folders) see `vignette("single-cell")`. Every reader prints what it detected, so you can
 confirm it.
 
 ### Differential expression

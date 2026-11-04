@@ -7,11 +7,13 @@
 buildCandidates(
   peaks,
   genes,
-  groups,
+  groups = NULL,
   signal = NULL,
   mappability = NULL,
   geneCol = NULL,
+  links = NULL,
   maxDist = 5000,
+  maxLinkDist = 5e+05,
   minMappability = 0.8,
   minCoverage = 0.5,
   requireSignal = names(signal),
@@ -24,7 +26,9 @@ example a peak-set label) are carried into the output.}
 
 \item{genes}{Gene models from \code{\link[=readGeneModels]{readGeneModels()}}.}
 
-\item{groups}{Gene groups from \code{\link[=defineGroups]{defineGroups()}} (needs \code{gene} and \code{group}).}
+\item{groups}{Gene groups from \code{\link[=defineGroups]{defineGroups()}} (needs \code{gene} and \code{group}),
+or \code{NULL} to consider every linked gene as one group (\code{"all"}), for
+picking loci without expression data.}
 
 \item{signal}{Optional named list of signal sources (see \link{signalSources}).}
 
@@ -35,7 +39,17 @@ from HOMER), the column holding it. That assignment is then checked
 against \code{genes} with \code{\link[=checkAssignment]{checkAssignment()}}. If \code{NULL} (default), peaks are
 assigned with \code{\link[=assignPeaks]{assignPeaks()}}.}
 
+\item{links}{Optional peak-gene links, e.g. from \code{Signac::Links()} on a
+multiome object: a \code{GRanges} or \code{data.frame} with a \code{gene} column and
+either a \code{peak} column (\code{"chr-start-end"}) or the peak coordinates, plus
+optional \code{score}/\code{pvalue}. When given, candidates are the linked
+peak-gene pairs (restricted to \code{peaks}) instead of distance-based
+assignments; \code{link_score} and \code{link_pvalue} can be used in ranking.}
+
 \item{maxDist}{Maximum peak-to-gene-body distance (bp).}
+
+\item{maxLinkDist}{With \code{links}: maximum peak-to-gene distance accepted
+(bp); longer links are flagged \code{near_gene = FALSE}.}
 
 \item{minMappability}{Minimum mean mappability for \code{mappable}.}
 

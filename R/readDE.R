@@ -99,6 +99,11 @@ readDE <- function(x, gene = NULL, lfc = NULL, padj = NULL, orgDb = NULL,
         stop("Could not find fold-change and adjusted p-value columns among: ",
              paste(cols, collapse = ", "), ". Name them with `lfc` and `padj`.",
              call. = FALSE)
+    if (identical(lfcCol, "avg_log2FC") && identical(padjCol, "p_val_adj")) {
+        src <- "Seurat FindMarkers (cell-level)"
+        warning(label, ": cell-level tests (Seurat FindMarkers) treat each cell as a ",
+                "replicate, so p-values are inflated. Prefer pseudobulkDE().", call. = FALSE)
+    }
     if (src == "table")
         src <- switch(lfcCol, log2FoldChange = "DESeq2-style table",
                       logFC = if (padjCol == "adj.P.Val") "limma-style table" else "edgeR-style table",
@@ -124,10 +129,11 @@ readDE <- function(x, gene = NULL, lfc = NULL, padj = NULL, orgDb = NULL,
     out <- suppressMessages(deTable(out, gene = "gene", lfc = "lfc", padj = "padj"))
 
     if (verbose) {
-        message(sprintf("%s: %s | lfc = '%s', padj = '%s', gene = %s (%s IDs) | %d genes",
-                        label, src, lfcCol, padjCol,
-                        if (is.null(geneCol)) "row names" else paste0("'", geneCol, "'"),
-                        idType, nrow(out)))
+        message(paste(strwrap(sprintf(
+            "%s: %s | lfc = '%s', padj = '%s', gene = %s (%s IDs) | %d genes",
+            label, src, lfcCol, padjCol,
+            if (is.null(geneCol)) "row names" else paste0("'", geneCol, "'"),
+            idType, nrow(out)), width = 78, exdent = 2), collapse = "\n"))
         if (nrow(out) < nIn)
             message("  ", nIn - nrow(out), " rows dropped (missing gene/p-value or duplicates).")
         if (!is.null(contrast)) message("  contrast: ", contrast,

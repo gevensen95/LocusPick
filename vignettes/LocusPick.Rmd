@@ -57,7 +57,7 @@ res <- locusPick(
 res
 ```
 
-```{r}
+```{r quick-start-plot}
 plot(res, "geneA")
 ```
 
@@ -160,13 +160,30 @@ signalShift(cand, "A_mean", "B_mean",
             background = signalAtPeaks(ex$peaks, ex$signal))
 ```
 
-If every group and the background show a similar shift, a track showing reduced
-binding at the example is consistent with the hypothesis but not specific to
-it. That difference should be reflected in the figure legend.
+`p_vs_zero` tests whether a group's change differs from 0 and
+`p_vs_background` whether it differs from all peaks. If a group's shift is
+significant against zero but not against the background, a track showing
+reduced binding at the example is consistent with the hypothesis but not
+specific to it. That difference should be reflected in the figure legend.
+
+### Typicality and stability
+
+Each weighted column also gets a percentile within its group (`pct_<column>`),
+so you can report how typical a pick is, and `weightStability()` shows how
+much the top loci depend on the exact weights:
+
+```{r}
+ranked[ranked$rank %in% 1, c("group", "gene", "pct_A_mean", "pct_abs_lfc_perturbation")]
+weightStability(cand, c(A_mean = 1, loss = 1, abs_lfc_perturbation = 1,
+                        abs_lfc_condition = 1), n = 1, B = 100)$summary
+```
+
+`topOverlap()` compares rankings built from different inputs, for example
+leaving out one replicate at a time.
 
 ### 6. Plots
 
-```{r}
+```{r locus-plot}
 plotLocus(top[1, ], ex$signal, ex$genes,
           trackGroups = list(Binding = c("A", "B")),
           colors = c(A = "steelblue", B = "salmon"),
@@ -186,6 +203,30 @@ reportLoci(top, "candidates.pdf", signal = ex$signal, genes = ex$genes,
            trackGroups = list(Binding = c("A", "B")),
            expression = ex$expression, candidates = ranked)
 ```
+
+## One contrast, or none
+
+Not every study has a perturbation *and* a condition. With one contrast,
+groups follow its direction; with none, all genes linked to a peak form one
+group and loci are ranked on signal alone:
+
+```{r}
+de <- read.delim(system.file("extdata", "toy_de.tsv", package = "LocusPick"))
+ko <- deTable(de, lfc = "ko_lfc", padj = "ko_padj")
+
+defineGroups(ko)[, c("gene", "group")]                  # activated / repressed
+
+only_ko <- locusPick(f("toy_peaks.bed"), perturbation = ko, genes = f("toy.gtf"),
+                     signal = list(young = f("toy_A.bw"), old = f("toy_B.bw")))
+only_ko$top[, c("group", "gene", "score")]
+
+no_de <- locusPick(f("toy_peaks.bed"), genes = f("toy.gtf"),
+                   signal = list(young = f("toy_A.bw"), old = f("toy_B.bw")),
+                   weights = c(signal_change = 1))      # largest loss young -> old
+no_de$top[1:3, c("gene", "peak_id", "signal_change")]
+```
+
+For single-cell data, see `vignette("single-cell", package = "LocusPick")`.
 
 ## Using your own data
 

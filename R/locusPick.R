@@ -7,7 +7,10 @@
 #' @param peaks Peak file(s) or object (see [readPeaks()]). Several files are
 #'   merged into consensus peaks.
 #' @param perturbation,condition DE results (see [readDE()]): DESeq2, edgeR or
-#'   limma objects or tables. Fold changes must be test / reference.
+#'   limma objects or tables. Fold changes must be test / reference. Either
+#'   or both may be omitted: with one contrast, groups follow its direction
+#'   (see [defineGroups()]); with none, all linked genes form one group and
+#'   loci are ranked on signal alone.
 #' @param genes Gene models: GTF path, `GRanges`, or [readGeneModels()] output.
 #' @param signal Optional named list of tracks. Each element can be a bigWig or
 #'   BAM path, several paths (averaged), or a signal source.
@@ -24,8 +27,10 @@
 #'   the contrast directions of plain tables, e.g. `"KO/WT"`, `"old/young"`.
 #' @param alpha,minLFC,perturbationType,conditionName Passed to
 #'   [defineGroups()].
-#' @param maxDist,minMappability,minCoverage,geneCol,assignMode Passed to
-#'   [buildCandidates()].
+#' @param links Optional peak-gene links (e.g. `Signac::Links()`), used
+#'   instead of distance-based assignment; see [buildCandidates()].
+#' @param maxDist,maxLinkDist,minMappability,minCoverage,geneCol,assignMode
+#'   Passed to [buildCandidates()].
 #' @param minReps,blacklist Passed to [readPeaks()].
 #' @param n Number of top loci per group.
 #' @return An object of class `LocusPickResult`: a list with `candidates`
@@ -47,12 +52,13 @@
 #'     mappability = f("toy_map.bw"))
 #' res
 #' @export
-locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
+locusPick <- function(peaks, perturbation = NULL, condition = NULL, genes, signal = NULL,
                       mappability = NULL, orgDb = NULL, expression = NULL,
                       weights = NULL, trackGroups = NULL,
                       perturbationDirection = NULL, conditionDirection = NULL,
                       alpha = 0.05, minLFC = 0, perturbationType = c("loss", "gain"),
-                      conditionName = "condition", maxDist = 5000,
+                      conditionName = "condition", links = NULL, maxDist = 5000,
+                      maxLinkDist = 5e5,
                       minMappability = 0.8, minCoverage = 0.5, geneCol = NULL,
                       assignMode = c("nearest", "all"), minReps = NULL,
                       blacklist = NULL, n = 10) {
@@ -67,11 +73,15 @@ locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
                 "Use geneCol = \"homer_gene\" to check HOMER's assignment instead.")
     gm <- if (inherits(genes, "locusGeneModels")) genes else
         readGeneModels(genes, harmonize = harm)
-    pert <- .readDEfor(perturbation, orgDb, perturbationDirection)
-    cond <- .readDEfor(condition, orgDb, conditionDirection)
-    groups <- defineGroups(pert, cond, alpha = alpha, minLFC = minLFC,
-                           perturbationType = perturbationType,
-                           conditionName = conditionName)
+    pert <- if (!is.null(perturbation)) .readDEfor(perturbation, orgDb, perturbationDirection)
+    cond <- if (!is.null(condition)) .readDEfor(condition, orgDb, conditionDirection)
+    groups <- if (is.null(pert) && is.null(cond)) {
+        message("  No DE results given: all linked genes form one group, ranked on signal.")
+        NULL
+    } else {
+        defineGroups(pert, cond, alpha = alpha, minLFC = minLFC,
+                     perturbationType = perturbationType, conditionName = conditionName)
+    }
     if (!is.null(signal)) {
         if (is.null(names(signal)) || any(names(signal) == ""))
             stop("signal must be a named list, e.g. list(young = ..., old = ...).", call. = FALSE)
@@ -88,7 +98,8 @@ locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
 
     message("== Building candidates")
     cand <- buildCandidates(pk, gm, groups, signal = signal, mappability = mappability,
-                            geneCol = geneCol, maxDist = maxDist,
+                            geneCol = geneCol, links = links, maxDist = maxDist,
+                            maxLinkDist = maxLinkDist,
                             minMappability = minMappability, minCoverage = minCoverage,
                             assignMode = assignMode)
     tr <- names(signal)
@@ -96,10 +107,15 @@ locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
         cand$signal_change <- cand[[paste0(tr[1], "_mean")]] - cand[[paste0(tr[2], "_mean")]]
     if (is.null(weights)) {
         weights <- c(abs_lfc_perturbation = 1, abs_lfc_condition = 1)
+        weights <- weights[names(weights) %in% names(cand)]
         if (length(tr)) weights <- c(stats::setNames(1, paste0(tr[1], "_mean")), weights)
+        if (!length(weights))
+            stop("Nothing to rank on: give signal tracks, DE results, or `weights`.",
+                 call. = FALSE)
     }
-    message("  ranking weights: ",
-            paste(names(weights), unlist(weights), sep = " = ", collapse = ", "))
+    message(paste(strwrap(paste0("  ranking weights: ", paste(names(weights), unlist(weights),
+                                                           sep = " = ", collapse = ", ")),
+                          width = 78, exdent = 4), collapse = "\n"))
     ranked <- rankLoci(cand, weights)
     top <- topLoci(ranked, n = n)
     qc <- qcSummary(cand)
@@ -116,8 +132,8 @@ locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
                    checks = checks, groups = groups, peaks = pk, genes = gm,
                    signal = signal, expression = expression, trackGroups = trackGroups,
                    weights = weights,
-                   contrasts = c(perturbation = .contrastLabel(pert),
-                                 condition = .contrastLabel(cond))),
+                   contrasts = c(perturbation = if (is.null(pert)) "none" else .contrastLabel(pert),
+                                 condition = if (is.null(cond)) "none" else .contrastLabel(cond))),
               class = "LocusPickResult")
 }
 
@@ -144,12 +160,15 @@ locusPick <- function(peaks, perturbation, condition, genes, signal = NULL,
 #' @export
 print.LocusPickResult <- function(x, ...) {
     cat("LocusPick result\n")
-    cat("  contrasts: perturbation =", x$contrasts[["perturbation"]],
-        "| condition =", x$contrasts[["condition"]], "\n")
+    cat("  perturbation:", x$contrasts[["perturbation"]], "\n")
+    cat("  condition:   ", x$contrasts[["condition"]], "\n")
+    if (!is.null(x$cellTypes)) cat("  cell types:", paste(x$cellTypes, collapse = ", "), "\n")
     cat("  peaks:", length(x$peaks), "| candidate peak-gene pairs:",
         nrow(x$candidates), "| eligible:", sum(x$candidates$eligible), "\n")
-    cat("  weights:", paste(names(x$weights), unlist(x$weights), sep = "=",
-                            collapse = ", "), "\n\n")
+    cat(strwrap(paste("  weights:", paste(names(x$weights), unlist(x$weights), sep = "=",
+                                          collapse = ", ")), width = 78, exdent = 4),
+        sep = "\n")
+    cat("\n")
     print(x$qc, row.names = FALSE)
     if (!is.null(x$shift)) {
         cat("\nSignal change (first vs second track):\n")
@@ -190,6 +209,9 @@ plot.LocusPickResult <- function(x, which = 1, ...) {
         } else x$top[i, , drop = FALSE]
     } else x$top[which, , drop = FALSE]
     if (is.null(x$signal)) stop("No signal tracks in this result.", call. = FALSE)
+    expr <- x$expression
+    if (!is.null(expr) && "cell_type" %in% names(row) && row$cell_type %in% expr$panel)
+        expr <- expr[expr$panel == row$cell_type, , drop = FALSE]
     plotLocus(row, x$signal, x$genes, trackGroups = x$trackGroups,
-              expression = x$expression, ...)
+              expression = expr, ...)
 }
